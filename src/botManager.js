@@ -365,7 +365,7 @@ class BotManager {
 
           // Advanced Plugins setup
           try {
-            const autoeat = require('mineflayer-auto-eat').plugin;
+            const autoeat = require('mineflayer-auto-eat');
             bot.loadPlugin(autoeat);
           } catch (e) {
             console.error('[BotManager] auto-eat plugin load failed:', e);
@@ -1065,6 +1065,11 @@ class BotManager {
             });
             continue; // Skip, already placed
           }
+          if (currentBlock && currentBlock.name !== 'air' && currentBlock.name !== 'water' && currentBlock.name !== 'lava') {
+            this.emitChatMessage(botId, 'error', `⚠️ Hedef dolu, atlanıyor: ${targetPos.x}, ${targetPos.y}, ${targetPos.z} (Mevcut: ${currentBlock.name})`);
+            botData.builderPlaced++; // Increment progress so it's not stuck
+            continue; // Skip, occupied by something else
+          }
         } catch (err) {
           // Ignore blockAt errors and continue
         }
@@ -1131,7 +1136,14 @@ class BotManager {
         // 5. Try to equip item to hand
         try {
           await bot.equip(item, 'hand');
-          await new Promise(r => setTimeout(r, 200));
+          await new Promise(r => setTimeout(r, 400)); // Increase delay
+          const held = bot.heldItem;
+          if (!held || held.name !== item.name) {
+            this.emitChatMessage(botId, 'error', `⚠️ Elinde "${held ? held.name : 'boş'}" var, "${item.name}" bekliyor.`);
+            // Retry equip
+            await bot.equip(item, 'hand');
+            await new Promise(r => setTimeout(r, 400));
+          }
         } catch (err) {
           this.emitChatMessage(botId, 'error', `⚠️ Malzeme kuşanma hatası: ${err.message}`);
         }
@@ -1166,16 +1178,27 @@ class BotManager {
 
         // 7. Place block against the reference block
         let placed = false;
+        
+        // Try to place on the found reference block
+        // If it fails, try other faces of the reference block
+        const faces = [pFace, new vec3(0, 1, 0), new vec3(0, -1, 0), new vec3(1, 0, 0), new vec3(-1, 0, 0), new vec3(0, 0, 1), new vec3(0, 0, -1)];
+        
         for (let retry = 0; retry < 3; retry++) {
-          try {
-            await bot.lookAt(refBlock.position.plus(new vec3(0.5, 0.5, 0.5)), true);
-            await bot.placeBlock(refBlock, pFace);
-            placed = true;
-            break; // Success!
-          } catch (err) {
-            this.emitChatMessage(botId, 'error', `⚠️ Blok yerleştirme başarısız (deneme ${retry + 1}/3): ${err.message}`);
-            await new Promise(r => setTimeout(r, 1000));
+          for (const face of faces) {
+            try {
+              if (!face) continue;
+              // Look at the correct point based on face
+              await bot.lookAt(refBlock.position.offset(0.5, 0.5, 0.5), true);
+              await bot.placeBlock(refBlock, face);
+              placed = true;
+              break; // Success!
+            } catch (err) {
+              // Ignore placement errors in retry loop
+            }
           }
+          if (placed) break;
+          this.emitChatMessage(botId, 'error', `⚠️ Blok yerleştirme başarısız (deneme ${retry + 1}/3)`);
+          await new Promise(r => setTimeout(r, 1000));
         }
 
         if (placed) {
@@ -1189,7 +1212,7 @@ class BotManager {
           });
 
           // Delay to make building look realistic and comply with server ticks
-          await new Promise(r => setTimeout(r, 600));
+          await new Promise(r => setTimeout(r, 300));
         } else {
           this.emitChatMessage(botId, 'error', `❌ Blok yerleştirilemedi, geçiliyor: ${targetPos.x}, ${targetPos.y}, ${targetPos.z}`);
         }

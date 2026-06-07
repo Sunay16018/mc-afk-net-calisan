@@ -2919,7 +2919,6 @@
           <button class="addon-tab" data-tab="radar" data-bot="${bot.id}">🗺️ Radar</button>
           <button class="addon-tab" data-tab="inventory-vis" data-bot="${bot.id}">🎒 Envanter</button>
           <button class="addon-tab" data-tab="console" data-bot="${bot.id}">📜 Konsol</button>
-          <button class="addon-tab" data-tab="builder" data-bot="${bot.id}">🏗️ Yapıcı</button>
         </div>
 
         <!-- Tab 1: Controls -->
@@ -3009,81 +3008,6 @@
           <div class="bot-console" id="console-${bot.id}"></div>
         </div>
 
-        <!-- Tab 5: Yapı Yapıcı (Builder) -->
-        <div class="addon-pane hidden" id="pane-builder-${bot.id}">
-          <div class="builder-pane" style="padding:15px; background:var(--bg-secondary); border-radius:8px; border:1px solid var(--border);">
-            <div style="font-size:0.8rem; margin-bottom:10px; color:var(--text-secondary); line-height:1.4;">
-              Hazır Şablon Seçin veya JSON Yükleyin.<br>
-              Örnek: <code style="font-family:monospace; background:#0d1117; padding:2px 4px; border-radius:3px; color:#f85149;">[{"x":0,"y":0,"z":0,"block":"cobblestone"}]</code>
-            </div>
-
-            <div style="margin-bottom:12px;">
-              <label style="font-size:0.75rem; color:var(--text-secondary); display:block; margin-bottom:4px;">📋 Hazır Şablon Seçin</label>
-              <select id="builder-preset-${bot.id}" style="width:100%; border:1px solid var(--border); border-radius:4px; padding:6px; background:var(--bg-tertiary); color:var(--text-primary); font-size:0.8rem; outline:none; cursor:pointer;">
-                <option value="">-- Kendi JSON dosyamı yükleyeceğim --</option>
-                <option value="cactus_4x4">🌵 Kaktüs Çiftliği (4x4 Çapraz / Otomatik Kıran)</option>
-              </select>
-            </div>
-            
-            <div style="display:flex; gap:10px; margin-bottom:12px;">
-              <input type="file" id="builder-file-${bot.id}" accept=".json" style="display:none;">
-              <button class="btn-panel-action" id="builder-upload-btn-${bot.id}" style="flex:1; background:var(--bg-tertiary); border:1px solid var(--border); border-radius:4px; padding:8px; color:var(--text-primary); cursor:pointer;">📂 JSON Yükle</button>
-              <button class="btn-panel-action danger hidden" id="builder-clear-btn-${bot.id}" style="background:var(--error); color:white; border:none; border-radius:4px; padding:8px; cursor:pointer;">🚨 Temizle</button>
-            </div>
-            
-            <div id="builder-status-box-${bot.id}" class="hidden" style="padding:10px; border:1px solid var(--border); border-radius:6px; background:#0d1117; font-size:0.8rem; margin-bottom:12px;">
-              <div style="display:flex; justify-content:space-between; font-weight:bold; color:var(--accent); margin-bottom:4px;">
-                <span>Yüklendi</span>
-                <span id="builder-block-count-${bot.id}">0 Blok</span>
-              </div>
-              <div id="builder-info-${bot.id}" style="color:var(--text-muted); font-size:0.75rem;"></div>
-            </div>
-
-            <div style="margin-bottom:12px;">
-              <label style="font-size:0.75rem; color:var(--text-secondary); display:block; margin-bottom:4px;">👁️ Yön / Hizalama</label>
-              <select id="builder-rotation-${bot.id}" style="width:100%; border:1px solid var(--border); border-radius:4px; padding:6px; background:var(--bg-tertiary); color:var(--text-primary); font-size:0.8rem; outline:none; cursor:pointer;">
-                <option value="auto" selected>🤖 Baktığı Yön (Otomatik)</option>
-                <option value="0">Güney (+Z / Varsayılan)</option>
-                <option value="90">Batı (-X / 90° Saat Yönü)</option>
-                <option value="180">Kuzey (-Z / 180°)</option>
-                <option value="270">Doğu (+X / 270° Saat Yönü)</option>
-              </select>
-            </div>
-
-            <div style="margin-bottom:12px;">
-              <label style="font-size:0.75rem; color:var(--text-secondary); display:block; margin-bottom:4px;">📍 Başlangıç Noktası (Origin)</label>
-              <select id="builder-origin-type-${bot.id}" style="width:100%; border:1px solid var(--border); border-radius:4px; padding:6px; background:var(--bg-tertiary); color:var(--text-primary); font-size:0.8rem; outline:none; cursor:pointer; margin-bottom:8px;">
-                <option value="bot">Botun Olduğu Konum (Göreli)</option>
-                <option value="custom">Belirli Koordinatlar (Göreli Değil / Tam Adres)</option>
-              </select>
-              <div id="builder-custom-coords-${bot.id}" class="hidden" style="display:flex; gap:6px;">
-                <input type="number" id="builder-x-${bot.id}" placeholder="X" style="width:33%; border:1px solid var(--border); border-radius:4px; padding:6px; background:var(--bg-tertiary); color:var(--text-primary); font-size:0.78rem; text-align:center;">
-                <input type="number" id="builder-y-${bot.id}" placeholder="Y" style="width:33%; border:1px solid var(--border); border-radius:4px; padding:6px; background:var(--bg-tertiary); color:var(--text-primary); font-size:0.78rem; text-align:center;">
-                <input type="number" id="builder-z-${bot.id}" placeholder="Z" style="width:34%; border:1px solid var(--border); border-radius:4px; padding:6px; background:var(--bg-tertiary); color:var(--text-primary); font-size:0.78rem; text-align:center;">
-              </div>
-            </div>
-
-            <div id="builder-invent-check-${bot.id}" class="hidden" style="padding:10px; border:1px solid var(--border); border-radius:6px; background:#0d1117; font-size:0.8rem; margin-bottom:12px; max-height:120px; overflow-y:auto;">
-              <div style="font-weight:bold; margin-bottom:6px; color:var(--warning);">Malzemeler & Eksik Listesi:</div>
-              <ul id="builder-check-list-${bot.id}" style="list-style-type:none; padding-left:0; line-height:1.4;"></ul>
-            </div>
-
-            <div style="display:flex; gap:10px;">
-              <button class="btn-panel-action" id="builder-start-${bot.id}" style="flex:1; background:var(--success); color:white; font-weight:bold; border:none; border-radius:4px; padding:10px; cursor:not-allowed; opacity:0.5;" disabled>▶️ İnşaatı Başlat</button>
-              <button class="btn-panel-action danger hidden" id="builder-stop-${bot.id}" style="flex:1; background:var(--error); color:white; font-weight:bold; border:none; border-radius:4px; padding:10px; cursor:pointer;">⏹️ İnşaatı Durdur</button>
-            </div>
-
-            <div id="builder-progress-${bot.id}" class="hidden" style="margin-top:12px;">
-              <div style="display:flex; justify-content:space-between; font-size:0.75rem; margin-bottom:4px;">
-                <span id="builder-progress-msg-${bot.id}" style="color:var(--text-secondary);">İnşa ediliyor...</span>
-                <span id="builder-progress-percent-${bot.id}" style="font-weight:bold; color:var(--success);">0%</span>
-              </div>
-              <div style="width:100%; height:6px; background:var(--bg-tertiary); border-radius:3px; overflow:hidden;">
-                <div id="builder-progress-bar-${bot.id}" style="width:0%; height:100%; background:var(--success); transition:width 0.3s ease;"></div>
-              </div>
-            </div>
-          </div>
-        </div>
 
         <div class="bot-controls">
           <input type="text" placeholder="Mesaj yaz..." data-bot="${bot.id}" class="msg-input">
