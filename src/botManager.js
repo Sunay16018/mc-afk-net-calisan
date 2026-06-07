@@ -764,7 +764,17 @@ class BotManager {
             } catch (err) {}
 
             this.emitChatMessage(botData.id, 'system', `⛏️ Kazılıyor: ${block.name}`);
-            await bot.dig(block, true);
+            
+            // Add timeout for digging
+            try {
+              await Promise.race([
+                bot.dig(block, true),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Digging timeout')), 7000))
+              ]);
+            } catch (err) {
+              this.emitChatMessage(botData.id, 'error', `⚠️ Kazma hatası: ${err.message}`);
+              try { bot.stopDigging(); } catch (e) {}
+            }
           } else {
             await new Promise(r => setTimeout(r, 100));
           }
@@ -1155,10 +1165,20 @@ class BotManager {
         }
 
         // 7. Place block against the reference block
-        try {
-          await bot.lookAt(refBlock.position.plus(new vec3(0.5, 0.5, 0.5)), true);
-          await bot.placeBlock(refBlock, pFace);
-          
+        let placed = false;
+        for (let retry = 0; retry < 3; retry++) {
+          try {
+            await bot.lookAt(refBlock.position.plus(new vec3(0.5, 0.5, 0.5)), true);
+            await bot.placeBlock(refBlock, pFace);
+            placed = true;
+            break; // Success!
+          } catch (err) {
+            this.emitChatMessage(botId, 'error', `⚠️ Blok yerleştirme başarısız (deneme ${retry + 1}/3): ${err.message}`);
+            await new Promise(r => setTimeout(r, 1000));
+          }
+        }
+
+        if (placed) {
           botData.builderPlaced++;
           this.io.emit('builder-progress', {
             botId,
@@ -1170,10 +1190,8 @@ class BotManager {
 
           // Delay to make building look realistic and comply with server ticks
           await new Promise(r => setTimeout(r, 600));
-
-        } catch (err) {
-          this.emitChatMessage(botId, 'error', `⚠️ Blok yerleştirme başarısız: ${err.message}`);
-          await new Promise(r => setTimeout(r, 500));
+        } else {
+          this.emitChatMessage(botId, 'error', `❌ Blok yerleştirilemedi, geçiliyor: ${targetPos.x}, ${targetPos.y}, ${targetPos.z}`);
         }
       }
 
