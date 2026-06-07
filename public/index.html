@@ -3034,10 +3034,11 @@
             <div style="margin-bottom:12px;">
               <label style="font-size:0.75rem; color:var(--text-secondary); display:block; margin-bottom:4px;">👁️ Yön / Hizalama</label>
               <select id="builder-rotation-${bot.id}" style="width:100%; border:1px solid var(--border); border-radius:4px; padding:6px; background:var(--bg-tertiary); color:var(--text-primary); font-size:0.8rem; outline:none; cursor:pointer;">
-                <option value="0">Güney (+Z/Varsayılan)</option>
-                <option value="90">Batı (-X/90° Saat Yönü)</option>
-                <option value="180">Kuzey (-Z/180°)</option>
-                <option value="270">Doğu (+X/270° Saat Yönü)</option>
+                <option value="auto" selected>🤖 Baktığı Yön (Otomatik)</option>
+                <option value="0">Güney (+Z / Varsayılan)</option>
+                <option value="90">Batı (-X / 90° Saat Yönü)</option>
+                <option value="180">Kuzey (-Z / 180°)</option>
+                <option value="270">Doğu (+X / 270° Saat Yönü)</option>
               </select>
             </div>
 
@@ -3487,7 +3488,7 @@
         startBtn.addEventListener('click', () => {
           if (!structureData) return;
           if (!isOfflineMode && socket && typeof socket.emit === 'function') {
-            const rot = parseInt(rotationSelect.value, 10) || 0;
+            const rot = rotationSelect.value === 'auto' ? 'auto' : (parseInt(rotationSelect.value, 10) || 0);
             let origin = null;
 
             if (originTypeSelect && originTypeSelect.value === 'custom') {

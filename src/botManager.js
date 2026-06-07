@@ -917,6 +917,37 @@ class BotManager {
     }
 
     const bot = botData.instance;
+
+    // Calculate rotation and direction text based on auto look-at or fixed option
+    let actualRotation = 0;
+    let directionText = 'Güney (+Z)';
+
+    if (rotation === 'auto') {
+      if (bot.entity && typeof bot.entity.yaw === 'number') {
+        let yawDeg = (bot.entity.yaw * 180 / Math.PI) % 360;
+        if (yawDeg < 0) yawDeg += 360;
+
+        if (yawDeg >= 45 && yawDeg < 135) {
+          actualRotation = 90;
+          directionText = 'Batı (-X)';
+        } else if (yawDeg >= 135 && yawDeg < 225) {
+          actualRotation = 180;
+          directionText = 'Kuzey (-Z)';
+        } else if (yawDeg >= 225 && yawDeg < 315) {
+          actualRotation = 270;
+          directionText = 'Doğu (+X)';
+        } else {
+          actualRotation = 0;
+          directionText = 'Güney (+Z)';
+        }
+      }
+    } else {
+      actualRotation = parseInt(rotation, 10) || 0;
+      if (actualRotation === 90) directionText = 'Batı (-X)';
+      else if (actualRotation === 180) directionText = 'Kuzey (-Z)';
+      else if (actualRotation === 270) directionText = 'Doğu (+X)';
+    }
+
     botData.builderActive = true;
     botData.builderPlaced = 0;
     botData.builderTotal = structure.length;
@@ -933,7 +964,7 @@ class BotManager {
     // Sort structure blocks by Y coordinate (bottom to top) to ensure foundation is placed first
     const sortedStructure = [...structure].sort((a, b) => a.y - b.y);
 
-    this.emitChatMessage(botId, 'system', `🏗️ İnşaat başlatıldı. Başlangıç noktası: X:${originPos.x} Y:${originPos.y} Z:${originPos.z}. Toplam: ${structure.length} Blok.`);
+    this.emitChatMessage(botId, 'system', `🏗️ İnşaat başlatıldı. Hizalama: ${directionText}, Başlangıç: X:${originPos.x} Y:${originPos.y} Z:${originPos.z}. Toplam: ${structure.length} Blok.`);
 
     const runBuildCycle = async () => {
 
@@ -947,13 +978,13 @@ class BotManager {
         let ty = b.y;
         let tz = b.z;
 
-        if (rotation === 90) {
+        if (actualRotation === 90) {
           tx = -b.z;
           tz = b.x;
-        } else if (rotation === 180) {
+        } else if (actualRotation === 180) {
           tx = -b.x;
           tz = -b.z;
-        } else if (rotation === 270) {
+        } else if (actualRotation === 270) {
           tx = b.z;
           tz = -b.x;
         }
