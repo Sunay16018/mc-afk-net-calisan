@@ -96,9 +96,7 @@ class BotManager {
   // ── RAM & Limit Hesaplamaları ───────────────────────────────
 
   getRamUsage() {
-    const totalRamMB = process.env.TOTAL_RAM_MB 
-      ? parseInt(process.env.TOTAL_RAM_MB, 10) 
-      : Math.floor(os.totalmem() / 1024 / 1024);
+    const totalRamMB = Math.floor(os.totalmem() / 1024 / 1024);
     const usedRamMB = Math.floor((os.totalmem() - os.freemem()) / 1024 / 1024);
     const availableRamMB = totalRamMB - usedRamMB;
 
