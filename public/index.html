@@ -2332,10 +2332,66 @@
       });
 
       socket.on('inventory-data', (data) => {
+        if (!state.botInventories) state.botInventories = new Map();
+        state.botInventories.set(data.botId, data);
+
         if (state.currentInventoryBotId === data.botId) {
           renderInventoryModal(data);
         }
         renderCardLiveInventory(data);
+
+        // Dispatch a custom event to notify builder tab about inventory changes
+        const card = document.getElementById('card-' + data.botId);
+        if (card) {
+          card.dispatchEvent(new CustomEvent('inventory-changed', { detail: data }));
+        }
+      });
+
+      socket.on('builder-progress', (data) => {
+        const { botId, total, placed, currentBlock, status, message } = data;
+        const progressBox = document.getElementById('builder-progress-' + botId);
+        const progressMsg = document.getElementById('builder-progress-msg-' + botId);
+        const progressPercent = document.getElementById('builder-progress-percent-' + botId);
+        const progressBar = document.getElementById('builder-progress-bar-' + botId);
+        const startBtn = document.getElementById('builder-start-' + botId);
+        const stopBtn = document.getElementById('builder-stop-' + botId);
+
+        if (progressBox && progressMsg && progressPercent && progressBar) {
+          progressBox.classList.remove('hidden');
+          
+          let percent = 0;
+          if (total > 0) percent = Math.round((placed / total) * 100);
+          
+          progressPercent.textContent = percent + '%';
+          progressBar.style.width = percent + '%';
+
+          if (status === 'building') {
+            progressMsg.textContent = `İnşa ediliyor: ${placed}/${total} (${currentBlock || ''})`;
+            if (startBtn) startBtn.classList.add('hidden');
+            if (stopBtn) stopBtn.classList.remove('hidden');
+          } else if (status === 'done') {
+            progressMsg.textContent = `✅ İnşaat tamamlandı! ${total} blok yerleştirildi.`;
+            progressBar.style.background = 'var(--success)';
+            if (startBtn) {
+              startBtn.classList.remove('hidden');
+              startBtn.style.opacity = '1';
+              startBtn.style.cursor = 'pointer';
+            }
+            if (stopBtn) stopBtn.classList.add('hidden');
+            showToast('success', 'İnşaat başarıyla tamamlandı!');
+          } else if (status === 'stopped') {
+            progressMsg.textContent = `⏹️ İnşaat durduruldu. (${placed}/${total})`;
+            if (startBtn) startBtn.classList.remove('hidden');
+            if (stopBtn) stopBtn.classList.add('hidden');
+            showToast('info', 'İnşaat durduruldu.');
+          } else if (status === 'error') {
+            progressMsg.textContent = `❌ Hata: ${message || 'Bilinmeyen Hata'}`;
+            progressBar.style.background = 'var(--error)';
+            if (startBtn) startBtn.classList.remove('hidden');
+            if (stopBtn) stopBtn.classList.add('hidden');
+            showToast('error', 'İnşaat Hatası: ' + message);
+          }
+        }
       });
 
       socket.on('player-list', ({ botId, players }) => {
@@ -2863,6 +2919,7 @@
           <button class="addon-tab" data-tab="radar" data-bot="${bot.id}">🗺️ Radar</button>
           <button class="addon-tab" data-tab="inventory-vis" data-bot="${bot.id}">🎒 Envanter</button>
           <button class="addon-tab" data-tab="console" data-bot="${bot.id}">📜 Konsol</button>
+          <button class="addon-tab" data-tab="builder" data-bot="${bot.id}">🏗️ Yapıcı</button>
         </div>
 
         <!-- Tab 1: Controls -->
@@ -2950,6 +3007,73 @@
         <!-- Tab 4: Console Log -->
         <div class="addon-pane hidden" id="pane-console-${bot.id}">
           <div class="bot-console" id="console-${bot.id}"></div>
+        </div>
+
+        <!-- Tab 5: Yapı Yapıcı (Builder) -->
+        <div class="addon-pane hidden" id="pane-builder-${bot.id}">
+          <div class="builder-pane" style="padding:15px; background:var(--bg-secondary); border-radius:8px; border:1px solid var(--border);">
+            <div style="font-size:0.8rem; margin-bottom:10px; color:var(--text-secondary); line-height:1.4;">
+              JSON Formatında Yapı Dosyası Yükleyin.<br>
+              Örnek: <code style="font-family:monospace; background:#0d1117; padding:2px 4px; border-radius:3px; color:#f85149;">[{"x":0,"y":0,"z":0,"block":"cobblestone"}]</code>
+            </div>
+            
+            <div style="display:flex; gap:10px; margin-bottom:12px;">
+              <input type="file" id="builder-file-${bot.id}" accept=".json" style="display:none;">
+              <button class="btn-panel-action" id="builder-upload-btn-${bot.id}" style="flex:1; background:var(--bg-tertiary); border:1px solid var(--border); border-radius:4px; padding:8px; color:var(--text-primary); cursor:pointer;">📂 JSON Yükle</button>
+              <button class="btn-panel-action danger hidden" id="builder-clear-btn-${bot.id}" style="background:var(--error); color:white; border:none; border-radius:4px; padding:8px; cursor:pointer;">🚨 Temizle</button>
+            </div>
+            
+            <div id="builder-status-box-${bot.id}" class="hidden" style="padding:10px; border:1px solid var(--border); border-radius:6px; background:#0d1117; font-size:0.8rem; margin-bottom:12px;">
+              <div style="display:flex; justify-content:space-between; font-weight:bold; color:var(--accent); margin-bottom:4px;">
+                <span>Yüklendi</span>
+                <span id="builder-block-count-${bot.id}">0 Blok</span>
+              </div>
+              <div id="builder-info-${bot.id}" style="color:var(--text-muted); font-size:0.75rem;"></div>
+            </div>
+
+            <div style="margin-bottom:12px;">
+              <label style="font-size:0.75rem; color:var(--text-secondary); display:block; margin-bottom:4px;">👁️ Yön / Hizalama</label>
+              <select id="builder-rotation-${bot.id}" style="width:100%; border:1px solid var(--border); border-radius:4px; padding:6px; background:var(--bg-tertiary); color:var(--text-primary); font-size:0.8rem; outline:none; cursor:pointer;">
+                <option value="0">Güney (+Z/Varsayılan)</option>
+                <option value="90">Batı (-X/90° Saat Yönü)</option>
+                <option value="180">Kuzey (-Z/180°)</option>
+                <option value="270">Doğu (+X/270° Saat Yönü)</option>
+              </select>
+            </div>
+
+            <div style="margin-bottom:12px;">
+              <label style="font-size:0.75rem; color:var(--text-secondary); display:block; margin-bottom:4px;">📍 Başlangıç Noktası (Origin)</label>
+              <select id="builder-origin-type-${bot.id}" style="width:100%; border:1px solid var(--border); border-radius:4px; padding:6px; background:var(--bg-tertiary); color:var(--text-primary); font-size:0.8rem; outline:none; cursor:pointer; margin-bottom:8px;">
+                <option value="bot">Botun Olduğu Konum (Göreli)</option>
+                <option value="custom">Belirli Koordinatlar (Göreli Değil / Tam Adres)</option>
+              </select>
+              <div id="builder-custom-coords-${bot.id}" class="hidden" style="display:flex; gap:6px;">
+                <input type="number" id="builder-x-${bot.id}" placeholder="X" style="width:33%; border:1px solid var(--border); border-radius:4px; padding:6px; background:var(--bg-tertiary); color:var(--text-primary); font-size:0.78rem; text-align:center;">
+                <input type="number" id="builder-y-${bot.id}" placeholder="Y" style="width:33%; border:1px solid var(--border); border-radius:4px; padding:6px; background:var(--bg-tertiary); color:var(--text-primary); font-size:0.78rem; text-align:center;">
+                <input type="number" id="builder-z-${bot.id}" placeholder="Z" style="width:34%; border:1px solid var(--border); border-radius:4px; padding:6px; background:var(--bg-tertiary); color:var(--text-primary); font-size:0.78rem; text-align:center;">
+              </div>
+            </div>
+
+            <div id="builder-invent-check-${bot.id}" class="hidden" style="padding:10px; border:1px solid var(--border); border-radius:6px; background:#0d1117; font-size:0.8rem; margin-bottom:12px; max-height:120px; overflow-y:auto;">
+              <div style="font-weight:bold; margin-bottom:6px; color:var(--warning);">Malzemeler & Eksik Listesi:</div>
+              <ul id="builder-check-list-${bot.id}" style="list-style-type:none; padding-left:0; line-height:1.4;"></ul>
+            </div>
+
+            <div style="display:flex; gap:10px;">
+              <button class="btn-panel-action" id="builder-start-${bot.id}" style="flex:1; background:var(--success); color:white; font-weight:bold; border:none; border-radius:4px; padding:10px; cursor:not-allowed; opacity:0.5;" disabled>▶️ İnşaatı Başlat</button>
+              <button class="btn-panel-action danger hidden" id="builder-stop-${bot.id}" style="flex:1; background:var(--error); color:white; font-weight:bold; border:none; border-radius:4px; padding:10px; cursor:pointer;">⏹️ İnşaatı Durdur</button>
+            </div>
+
+            <div id="builder-progress-${bot.id}" class="hidden" style="margin-top:12px;">
+              <div style="display:flex; justify-content:space-between; font-size:0.75rem; margin-bottom:4px;">
+                <span id="builder-progress-msg-${bot.id}" style="color:var(--text-secondary);">İnşa ediliyor...</span>
+                <span id="builder-progress-percent-${bot.id}" style="font-weight:bold; color:var(--success);">0%</span>
+              </div>
+              <div style="width:100%; height:6px; background:var(--bg-tertiary); border-radius:3px; overflow:hidden;">
+                <div id="builder-progress-bar-${bot.id}" style="width:0%; height:100%; background:var(--success); transition:width 0.3s ease;"></div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="bot-controls">
@@ -3191,6 +3315,221 @@
       const lookPad = card.querySelector('#look-pad-' + bot.id);
       if (lookPad) {
         initLookPad(lookPad, bot.id);
+      }
+
+      // ── Yapı İnşaatı (Builder) UI Kontrolleri ───────────────
+      const fileInput = card.querySelector('#builder-file-' + bot.id);
+      const uploadBtn = card.querySelector('#builder-upload-btn-' + bot.id);
+      const clearBtn = card.querySelector('#builder-clear-btn-' + bot.id);
+      const statusBox = card.querySelector('#builder-status-box-' + bot.id);
+      const blockCountSpan = card.querySelector('#builder-block-count-' + bot.id);
+      const infoDiv = card.querySelector('#builder-info-' + bot.id);
+      const checkDiv = card.querySelector('#builder-invent-check-' + bot.id);
+      const checkList = card.querySelector('#builder-check-list-' + bot.id);
+      const startBtn = card.querySelector('#builder-start-' + bot.id);
+      const stopBtn = card.querySelector('#builder-stop-' + bot.id);
+      const rotationSelect = card.querySelector('#builder-rotation-' + bot.id);
+      const originTypeSelect = card.querySelector('#builder-origin-type-' + bot.id);
+      const customCoordsDiv = card.querySelector('#builder-custom-coords-' + bot.id);
+      const xInput = card.querySelector('#builder-x-' + bot.id);
+      const yInput = card.querySelector('#builder-y-' + bot.id);
+      const zInput = card.querySelector('#builder-z-' + bot.id);
+      const progressBox = card.querySelector('#builder-progress-' + bot.id);
+
+      if (originTypeSelect && customCoordsDiv) {
+        originTypeSelect.addEventListener('change', () => {
+          if (originTypeSelect.value === 'custom') {
+            customCoordsDiv.classList.remove('hidden');
+          } else {
+            customCoordsDiv.classList.add('hidden');
+          }
+        });
+      }
+
+      let structureData = null;
+
+      const runLocalInventoryCheck = () => {
+        if (!structureData) return;
+        
+        const requiredCounts = {};
+        structureData.forEach(b => {
+          requiredCounts[b.block] = (requiredCounts[b.block] || 0) + 1;
+        });
+
+        if (!state.botInventories) state.botInventories = new Map();
+        const invData = state.botInventories.get(bot.id);
+        
+        checkList.innerHTML = '';
+        checkDiv.classList.remove('hidden');
+
+        if (!invData || !invData.success || !invData.slots) {
+          checkList.innerHTML = `<li style="color:var(--warning); line-height:1.4;">⚠️ Envanter bilgisi henüz sunucudan alınmadı.<br><span style="font-size:0.75rem; color:var(--text-muted);">Tavsiye: Envanter sekmesini açarak veya tazeleyerek güncel eşya listesini çekebilirsiniz.</span></li>`;
+          startBtn.removeAttribute('disabled');
+          startBtn.style.cursor = 'pointer';
+          startBtn.style.opacity = '1';
+          return;
+        }
+
+        const currentCounts = {};
+        invData.slots.forEach(slot => {
+          if (slot && slot.name) {
+            const name = slot.name.replace('minecraft:', '');
+            currentCounts[name] = (currentCounts[name] || 0) + slot.count;
+          }
+        });
+
+        let hasAll = true;
+        let checkHtml = '';
+
+        Object.entries(requiredCounts).forEach(([blockName, reqCount]) => {
+          const normName = blockName.replace('minecraft:', '');
+          const currentCount = currentCounts[normName] || 0;
+          const diff = reqCount - currentCount;
+
+          if (diff > 0) {
+            hasAll = false;
+            checkHtml += `<li style="color:var(--error); margin-bottom:4px; display:flex; justify-content:space-between; font-size:0.78rem;">
+              <span>❌ ${normName}</span>
+              <span>Eksik: ${diff} (Mevcut: ${currentCount}/${reqCount})</span>
+            </li>`;
+          } else {
+            checkHtml += `<li style="color:var(--success); margin-bottom:4px; display:flex; justify-content:space-between; font-size:0.78rem;">
+              <span>✅ ${normName}</span>
+              <span>Yeterli (${currentCount}/${reqCount})</span>
+            </li>`;
+          }
+        });
+
+        checkList.innerHTML = checkHtml;
+
+        startBtn.removeAttribute('disabled');
+        startBtn.style.cursor = 'pointer';
+        if (hasAll) {
+          startBtn.style.opacity = '1';
+          startBtn.style.background = 'var(--success)';
+        } else {
+          startBtn.style.opacity = '0.9';
+          startBtn.style.background = 'var(--warning)';
+        }
+      };
+
+      if (uploadBtn && fileInput) {
+        uploadBtn.addEventListener('click', () => {
+          fileInput.click();
+        });
+
+        fileInput.addEventListener('change', (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+
+          const reader = new FileReader();
+          reader.onload = (evt) => {
+            try {
+              const data = JSON.parse(evt.target.result);
+              if (!Array.isArray(data)) {
+                throw new Error('Dosya bir dizi formatında olmalı!');
+              }
+              if (data.length === 0) {
+                throw new Error('Yapı şablonu boş.');
+              }
+
+              const valid = data.every(b => b && typeof b.x === 'number' && typeof b.y === 'number' && typeof b.z === 'number' && typeof b.block === 'string');
+              if (!valid) {
+                throw new Error('Her blokta x,y,z sayı ve block metin olmalıdır.');
+              }
+
+              structureData = data;
+              blockCountSpan.textContent = `${data.length} Blok`;
+              
+              const blockCounts = {};
+              data.forEach(b => {
+                const norm = b.block.replace('minecraft:', '');
+                blockCounts[norm] = (blockCounts[norm] || 0) + 1;
+              });
+
+              let blockSummary = Object.entries(blockCounts).map(([name, count]) => `${count}x ${name}`).join(', ');
+              if (blockSummary.length > 80) blockSummary = blockSummary.substring(0, 80) + '...';
+              infoDiv.textContent = `Bloklar: ${blockSummary}`;
+
+              statusBox.classList.remove('hidden');
+              clearBtn.classList.remove('hidden');
+
+              runLocalInventoryCheck();
+
+            } catch (err) {
+              showToast('error', 'Yükleme Hatası: ' + err.message);
+              structureData = null;
+              statusBox.classList.add('hidden');
+              clearBtn.classList.add('hidden');
+              checkDiv.classList.add('hidden');
+              startBtn.setAttribute('disabled', 'true');
+              startBtn.style.cursor = 'not-allowed';
+              startBtn.style.opacity = '0.5';
+            }
+          };
+          reader.readAsText(file);
+        });
+
+        clearBtn.addEventListener('click', () => {
+          fileInput.value = '';
+          structureData = null;
+          statusBox.classList.add('hidden');
+          clearBtn.classList.add('hidden');
+          checkDiv.classList.add('hidden');
+          startBtn.setAttribute('disabled', 'true');
+          startBtn.style.cursor = 'not-allowed';
+          startBtn.style.opacity = '0.5';
+          progressBox.classList.add('hidden');
+          stopBtn.classList.add('hidden');
+          startBtn.classList.remove('hidden');
+        });
+
+        startBtn.addEventListener('click', () => {
+          if (!structureData) return;
+          if (!isOfflineMode && socket && typeof socket.emit === 'function') {
+            const rot = parseInt(rotationSelect.value, 10) || 0;
+            let origin = null;
+
+            if (originTypeSelect && originTypeSelect.value === 'custom') {
+              const xVal = parseFloat(xInput.value);
+              const yVal = parseFloat(yInput.value);
+              const zVal = parseFloat(zInput.value);
+
+              if (isNaN(xVal) || isNaN(yVal) || isNaN(zVal)) {
+                showToast('error', 'Lütfen geçerli X, Y ve Z koordinatlarını girin!');
+                return;
+              }
+              origin = { x: xVal, y: yVal, z: zVal };
+            }
+
+            socket.emit('start-builder', { 
+              botId: bot.id, 
+              structure: structureData, 
+              rotation: rot,
+              origin: origin
+            });
+            showToast('success', 'İnşaat süreci sunucuya bildirildi.');
+            
+            startBtn.classList.add('hidden');
+            stopBtn.classList.remove('hidden');
+            progressBox.classList.remove('hidden');
+          } else {
+            showToast('warning', 'Yalnızca çevrimiçi botlarla inşaat yapabilirsiniz.');
+          }
+        });
+
+        stopBtn.addEventListener('click', () => {
+          if (!isOfflineMode && socket && typeof socket.emit === 'function') {
+            socket.emit('stop-builder', { botId: bot.id });
+            showToast('info', 'İnşaat durduruluyor...');
+          }
+        });
+
+        card.addEventListener('inventory-changed', () => {
+          if (structureData) {
+            runLocalInventoryCheck();
+          }
+        });
       }
 
       return card;

@@ -363,6 +363,28 @@ class BotManager {
 
           botData.antiAfk = new AntiAfk(bot);
 
+          // Advanced Plugins setup
+          try {
+            const armorManager = require('mineflayer-armor-manager');
+            bot.loadPlugin(armorManager);
+          } catch (e) {
+            console.error('[BotManager] armor-manager plugin load failed:', e);
+          }
+
+          try {
+            const autoeat = require('mineflayer-auto-eat').plugin;
+            bot.loadPlugin(autoeat);
+          } catch (e) {
+            console.error('[BotManager] auto-eat plugin load failed:', e);
+          }
+
+          try {
+            const pathfinder = require('mineflayer-pathfinder').pathfinder;
+            bot.loadPlugin(pathfinder);
+          } catch (e) {
+            console.error('[BotManager] pathfinder plugin load failed:', e);
+          }
+
           resolve();
         }
       });
@@ -370,6 +392,14 @@ class BotManager {
       bot.on('spawn', () => {
         this.emitChatMessage(botData.id, 'system', '🎮 Spawn noktasına ışınlandı.');
         
+        if (bot.autoEat) {
+          try {
+            bot.autoEat.enable();
+          } catch (e) {
+            console.error('[BotManager] Error enabling autoeat:', e);
+          }
+        }
+
         if (bot.inventory && !botData.inventoryListenerBound) {
           botData.inventoryListenerBound = true;
           bot.inventory.on('windowUpdate', () => {
@@ -873,6 +903,242 @@ class BotManager {
     }
 
     return { success: true, message: `${removed} bot çıkarıldı.` };
+  }
+
+  // ── Yapı İnşaatı Komutları (Builder) ───────────────────────
+
+  startBuilder(botId, structure, rotation = 0, origin = null) {
+    const botData = this.bots.get(botId);
+    if (!botData) return { success: false, message: 'Bot bulunamadı.' };
+    if (!botData.instance || botData.status !== 'online') return { success: false, message: 'Bot çevrimdışı.' };
+
+    if (botData.builderActive) {
+      return { success: false, message: 'Bot zaten bir inşaat sürecinde!' };
+    }
+
+    const bot = botData.instance;
+    botData.builderActive = true;
+    botData.builderPlaced = 0;
+    botData.builderTotal = structure.length;
+
+    const vec3 = require('vec3');
+    // Capture starting origin position (floor to match blocks or custom position)
+    let originPos;
+    if (origin && typeof origin.x === 'number' && typeof origin.y === 'number' && typeof origin.z === 'number') {
+      originPos = new vec3(Math.floor(origin.x), Math.floor(origin.y), Math.floor(origin.z));
+    } else {
+      originPos = bot.entity.position.clone().floor();
+    }
+    
+    // Sort structure blocks by Y coordinate (bottom to top) to ensure foundation is placed first
+    const sortedStructure = [...structure].sort((a, b) => a.y - b.y);
+
+    this.emitChatMessage(botId, 'system', `🏗️ İnşaat başlatıldı. Başlangıç noktası: X:${originPos.x} Y:${originPos.y} Z:${originPos.z}. Toplam: ${structure.length} Blok.`);
+
+    const runBuildCycle = async () => {
+
+      for (let i = 0; i < sortedStructure.length; i++) {
+        if (!botData.builderActive || botData.status !== 'online') break;
+
+        const b = sortedStructure[i];
+        
+        // 1. Transform relative coordinates based on selected rotation
+        let tx = b.x;
+        let ty = b.y;
+        let tz = b.z;
+
+        if (rotation === 90) {
+          tx = -b.z;
+          tz = b.x;
+        } else if (rotation === 180) {
+          tx = -b.x;
+          tz = -b.z;
+        } else if (rotation === 270) {
+          tx = b.z;
+          tz = -b.x;
+        }
+
+        const targetPos = originPos.offset(tx, ty, tz);
+        const blockName = b.block.replace('minecraft:', '');
+        
+        // 2. Check if the block is already placed
+        try {
+          const currentBlock = bot.blockAt(targetPos);
+          if (currentBlock && currentBlock.name === blockName) {
+            botData.builderPlaced++;
+            this.io.emit('builder-progress', {
+              botId,
+              total: botData.builderTotal,
+              placed: botData.builderPlaced,
+              currentBlock: blockName,
+              status: 'building'
+            });
+            continue; // Skip, already placed
+          }
+        } catch (err) {
+          // Ignore blockAt errors and continue
+        }
+
+        // 3. Find the item in bot inventory
+        const item = bot.inventory.items().find(it => it.name === blockName);
+        if (!item) {
+          botData.builderActive = false;
+          this.io.emit('builder-progress', {
+            botId,
+            total: botData.builderTotal,
+            placed: botData.builderPlaced,
+            status: 'error',
+            message: `Kayıp Malzeme: Envanterde "${b.block}" bulunamadı.`
+          });
+          this.emitChatMessage(botId, 'error', `❌ İnşaat durduruldu. Malzeme eksik: ${b.block}`);
+          break;
+        }
+
+        // 4. Check if we are too far from target position.
+        let dist = bot.entity.position.distanceTo(targetPos);
+        if (dist > 4.5) {
+          this.emitChatMessage(botId, 'system', `🚶 Blok çok uzakta (Uzaklık: ${Math.round(dist)}m). Hedefe yaklaşılıyor...`);
+          
+          if (bot.pathfinder) {
+            try {
+              const { GoalNear } = require('mineflayer-pathfinder').goals;
+              bot.pathfinder.setGoal(new GoalNear(targetPos.x, targetPos.y, targetPos.z, 3));
+              const startWalkTime = Date.now();
+              while (bot.entity.position.distanceTo(targetPos) > 3.5 && botData.builderActive && botData.status === 'online') {
+                await new Promise(r => setTimeout(r, 200));
+                if (Date.now() - startWalkTime > 12000) {
+                  break;
+                }
+              }
+              bot.pathfinder.setGoal(null);
+            } catch (err) {
+              console.error('Pathfinder navigation failed:', err);
+            }
+          } else {
+            try {
+              // Face the target position
+              await bot.lookAt(targetPos.offset(0.5, 0.5, 0.5), true);
+              bot.setControlState('forward', true);
+
+              // Walk until distance is <= 3.5m or timeout (8 seconds)
+              const startWalkTime = Date.now();
+              while (bot.entity.position.distanceTo(targetPos) > 3.5 && botData.builderActive && botData.status === 'online') {
+                await new Promise(r => setTimeout(r, 100));
+                await bot.lookAt(targetPos.offset(0.5, 0.5, 0.5), true);
+                if (Date.now() - startWalkTime > 8000) {
+                  break;
+                }
+              }
+            } catch (e) {}
+
+            try {
+              bot.setControlState('forward', false);
+            } catch (e) {}
+          }
+          dist = bot.entity.position.distanceTo(targetPos);
+        }
+
+        // 5. Try to equip item to hand
+        try {
+          await bot.equip(item, 'hand');
+          await new Promise(r => setTimeout(r, 200));
+        } catch (err) {
+          this.emitChatMessage(botId, 'error', `⚠️ Malzeme kuşanma hatası: ${err.message}`);
+        }
+
+        // 6. Find support block to place against
+        const directions = [
+          { offset: new vec3(0, -1, 0), face: new vec3(0, 1, 0) }, // Below
+          { offset: new vec3(1, 0, 0), face: new vec3(-1, 0, 0) },  // East
+          { offset: new vec3(-1, 0, 0), face: new vec3(1, 0, 0) },  // West
+          { offset: new vec3(0, 0, 1), face: new vec3(0, 0, -1) },  // South
+          { offset: new vec3(0, 0, -1), face: new vec3(0, 0, 1) },  // North
+          { offset: new vec3(0, 1, 0), face: new vec3(0, -1, 0) }   // Above
+        ];
+
+        let refBlock = null;
+        let pFace = null;
+
+        for (const dir of directions) {
+          const adjPos = targetPos.plus(dir.offset);
+          const bl = bot.blockAt(adjPos);
+          if (bl && bl.name !== 'air' && bl.name !== 'water' && bl.name !== 'lava') {
+            refBlock = bl;
+            pFace = dir.face;
+            break;
+          }
+        }
+
+        if (!refBlock) {
+          this.emitChatMessage(botId, 'error', `⚠️ Blok havada kalamaz (X:${targetPos.x} Y:${targetPos.y} Z:${targetPos.z}). Destek blok bulunamadı!`);
+          continue;
+        }
+
+        // 7. Place block against the reference block
+        try {
+          await bot.lookAt(refBlock.position.plus(new vec3(0.5, 0.5, 0.5)), true);
+          await bot.placeBlock(refBlock, pFace);
+          
+          botData.builderPlaced++;
+          this.io.emit('builder-progress', {
+            botId,
+            total: botData.builderTotal,
+            placed: botData.builderPlaced,
+            currentBlock: blockName,
+            status: 'building'
+          });
+
+          // Delay to make building look realistic and comply with server ticks
+          await new Promise(r => setTimeout(r, 600));
+
+        } catch (err) {
+          this.emitChatMessage(botId, 'error', `⚠️ Blok yerleştirme başarısız: ${err.message}`);
+          await new Promise(r => setTimeout(r, 500));
+        }
+      }
+
+      // Done building or loop interrupted
+      if (botData.builderActive) {
+        botData.builderActive = false;
+        this.io.emit('builder-progress', {
+          botId,
+          total: botData.builderTotal,
+          placed: botData.builderPlaced,
+          status: 'done'
+        });
+        this.emitChatMessage(botId, 'system', `✅ İnşaat başarıyla tamamlandı! Toplam ${botData.builderPlaced}/${botData.builderTotal} blok bitti.`);
+      }
+    };
+
+    runBuildCycle();
+    return { success: true, message: 'İnşaat süreci başlatıldı.' };
+  }
+
+  stopBuilder(botId) {
+    const botData = this.bots.get(botId);
+    if (!botData) return { success: false, message: 'Bot bulunamadı.' };
+    
+    if (!botData.builderActive) {
+      return { success: false, message: 'Aktif bir inşaat işlemi bulunmuyor.' };
+    }
+
+    botData.builderActive = false;
+    this.io.emit('builder-progress', {
+      botId,
+      total: botData.builderTotal,
+      placed: botData.builderPlaced,
+      status: 'stopped'
+    });
+    this.emitChatMessage(botId, 'system', `⏹️ İnşaat kullanıcı tarafından durduruldu. (${botData.builderPlaced}/${botData.builderTotal})`);
+
+    // Turn off movement control if walking
+    if (botData.instance) {
+      try {
+        botData.instance.setControlState('forward', false);
+      } catch (err) {}
+    }
+
+    return { success: true, message: 'İnşaat durduruldu.' };
   }
 
   _cleanupBot(botId) {

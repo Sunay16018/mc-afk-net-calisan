@@ -315,6 +315,33 @@ io.on('connection', (socket) => {
     }
   });
 
+  // ── Yapı İnşaatı Başlat / Durdur (Builder) ───────────────────
+  socket.on('start-builder', ({ botId, structure, rotation, origin }) => {
+    try {
+      const result = botManager.startBuilder(botId, structure, rotation, origin);
+      socket.emit('system-message', {
+        type: result.success ? 'success' : 'error',
+        text: result.message
+      });
+    } catch (err) {
+      console.error('[Socket] start-builder hatası:', err);
+      socket.emit('system-message', { type: 'error', text: 'İnşaat başlatılamadı.' });
+    }
+  });
+
+  socket.on('stop-builder', ({ botId }) => {
+    try {
+      const result = botManager.stopBuilder(botId);
+      socket.emit('system-message', {
+        type: result.success ? 'success' : 'error',
+        text: result.message
+      });
+    } catch (err) {
+      console.error('[Socket] stop-builder hatası:', err);
+      socket.emit('system-message', { type: 'error', text: 'İnşaat durdurulamadı.' });
+    }
+  });
+
   // ── Envanter İste ────────────────────────────────────────
   socket.on('get-inventory', (botId) => {
     try {
