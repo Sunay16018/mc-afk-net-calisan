@@ -3013,8 +3013,16 @@
         <div class="addon-pane hidden" id="pane-builder-${bot.id}">
           <div class="builder-pane" style="padding:15px; background:var(--bg-secondary); border-radius:8px; border:1px solid var(--border);">
             <div style="font-size:0.8rem; margin-bottom:10px; color:var(--text-secondary); line-height:1.4;">
-              JSON Formatında Yapı Dosyası Yükleyin.<br>
+              Hazır Şablon Seçin veya JSON Yükleyin.<br>
               Örnek: <code style="font-family:monospace; background:#0d1117; padding:2px 4px; border-radius:3px; color:#f85149;">[{"x":0,"y":0,"z":0,"block":"cobblestone"}]</code>
+            </div>
+
+            <div style="margin-bottom:12px;">
+              <label style="font-size:0.75rem; color:var(--text-secondary); display:block; margin-bottom:4px;">📋 Hazır Şablon Seçin</label>
+              <select id="builder-preset-${bot.id}" style="width:100%; border:1px solid var(--border); border-radius:4px; padding:6px; background:var(--bg-tertiary); color:var(--text-primary); font-size:0.8rem; outline:none; cursor:pointer;">
+                <option value="">-- Kendi JSON dosyamı yükleyeceğim --</option>
+                <option value="cactus_4x4">🌵 Kaktüs Çiftliği (4x4 Çapraz / Otomatik Kıran)</option>
+              </select>
             </div>
             
             <div style="display:flex; gap:10px; margin-bottom:12px;">
@@ -3349,6 +3357,79 @@
 
       let structureData = null;
 
+      const presetSelect = card.querySelector('#builder-preset-' + bot.id);
+      if (presetSelect) {
+        presetSelect.addEventListener('change', () => {
+          const val = presetSelect.value;
+          if (val === 'cactus_4x4') {
+            const data = [
+              {"x": 0, "y": 0, "z": 0, "block": "minecraft:cobblestone"},
+              {"x": 2, "y": 0, "z": 0, "block": "minecraft:cobblestone"},
+              {"x": 1, "y": 0, "z": 1, "block": "minecraft:cobblestone"},
+              {"x": 3, "y": 0, "z": 1, "block": "minecraft:cobblestone"},
+              {"x": 0, "y": 0, "z": 2, "block": "minecraft:cobblestone"},
+              {"x": 2, "y": 0, "z": 2, "block": "minecraft:cobblestone"},
+              {"x": 1, "y": 0, "z": 3, "block": "minecraft:cobblestone"},
+              {"x": 3, "y": 0, "z": 3, "block": "minecraft:cobblestone"},
+
+              {"x": 0, "y": 1, "z": 0, "block": "minecraft:sand"},
+              {"x": 2, "y": 1, "z": 0, "block": "minecraft:sand"},
+              {"x": 1, "y": 1, "z": 1, "block": "minecraft:sand"},
+              {"x": 3, "y": 1, "z": 1, "block": "minecraft:sand"},
+              {"x": 0, "y": 1, "z": 2, "block": "minecraft:sand"},
+              {"x": 2, "y": 1, "z": 2, "block": "minecraft:sand"},
+              {"x": 1, "y": 1, "z": 3, "block": "minecraft:sand"},
+              {"x": 3, "y": 1, "z": 3, "block": "minecraft:sand"},
+
+              {"x": 0, "y": 2, "z": 0, "block": "minecraft:cactus"},
+              {"x": 2, "y": 2, "z": 0, "block": "minecraft:cactus"},
+              {"x": 1, "y": 2, "z": 1, "block": "minecraft:cactus"},
+              {"x": 3, "y": 2, "z": 1, "block": "minecraft:cactus"},
+              {"x": 0, "y": 2, "z": 2, "block": "minecraft:cactus"},
+              {"x": 2, "y": 2, "z": 2, "block": "minecraft:cactus"},
+              {"x": 1, "y": 2, "z": 3, "block": "minecraft:cactus"},
+              {"x": 3, "y": 2, "z": 3, "block": "minecraft:cactus"},
+
+              {"x": 1, "y": 3, "z": 0, "block": "minecraft:oak_fence"},
+              {"x": 3, "y": 3, "z": 0, "block": "minecraft:oak_fence"},
+              {"x": 1, "y": 3, "z": 2, "block": "minecraft:oak_fence"},
+              {"x": 3, "y": 3, "z": 2, "block": "minecraft:oak_fence"}
+            ];
+            
+            structureData = data;
+            blockCountSpan.textContent = `${data.length} Blok`;
+            
+            const blockCounts = {};
+            data.forEach(b => {
+              const norm = b.block.replace('minecraft:', '');
+              blockCounts[norm] = (blockCounts[norm] || 0) + 1;
+            });
+
+            let blockSummary = Object.entries(blockCounts).map(([name, count]) => `${count}x ${name}`).join(', ');
+            if (blockSummary.length > 80) blockSummary = blockSummary.substring(0, 80) + '...';
+            infoDiv.textContent = `Bloklar: ${blockSummary}`;
+
+            statusBox.classList.remove('hidden');
+            clearBtn.classList.remove('hidden');
+
+            runLocalInventoryCheck();
+          } else {
+            // clear preset
+            fileInput.value = '';
+            structureData = null;
+            statusBox.classList.add('hidden');
+            clearBtn.classList.add('hidden');
+            checkDiv.classList.add('hidden');
+            startBtn.setAttribute('disabled', 'true');
+            startBtn.style.cursor = 'not-allowed';
+            startBtn.style.opacity = '0.5';
+            progressBox.classList.add('hidden');
+            stopBtn.classList.add('hidden');
+            startBtn.classList.remove('hidden');
+          }
+        });
+      }
+
       const runLocalInventoryCheck = () => {
         if (!structureData) return;
         
@@ -3473,6 +3554,7 @@
 
         clearBtn.addEventListener('click', () => {
           fileInput.value = '';
+          if (presetSelect) presetSelect.value = '';
           structureData = null;
           statusBox.classList.add('hidden');
           clearBtn.classList.add('hidden');

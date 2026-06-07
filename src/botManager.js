@@ -714,14 +714,65 @@ class BotManager {
     const digLoop = async () => {
       while (botData.miningActive && bot && botData.status === 'online') {
         try {
+          if (bot.targetDigBlock) {
+            // Already digging a block, do not interrupt!
+            await new Promise(r => setTimeout(r, 150));
+            continue;
+          }
+
           const block = bot.blockAtCursor(5);
           if (block && block.name !== 'air') {
-            await bot.dig(block);
+            // Check if block can be dug
+            if (bot.canDigBlock && !bot.canDigBlock(block)) {
+              await new Promise(r => setTimeout(r, 250));
+              continue;
+            }
+
+            // Don't dig blocks that are too far
+            const dist = bot.entity.position.distanceTo(block.position);
+            if (dist > 4.5) {
+              await new Promise(r => setTimeout(r, 250));
+              continue;
+            }
+
+            // Auto-equip the best tool if possible
+            if (bot.inventory) {
+              const tool = bot.inventory.items().find(item => {
+                const bName = block.name.toLowerCase();
+                const iName = item.name.toLowerCase();
+                if (bName.includes('stone') || bName.includes('ore') || bName.includes('obsidian') || bName.includes('cobble') || bName.includes('brick') || bName.includes('terracotta') || bName.includes('iron') || bName.includes('gold') || bName.includes('diamond')) {
+                  return iName.includes('pickaxe');
+                }
+                if (bName.includes('wood') || bName.includes('log') || bName.includes('plank') || bName.includes('chest') || bName.includes('door') || bName.includes('fence')) {
+                  return iName.includes('axe') && !iName.includes('pickaxe');
+                }
+                if (bName.includes('dirt') || bName.includes('grass') || bName.includes('sand') || bName.includes('gravel') || bName.includes('clay') || bName.includes('soul_')) {
+                  return iName.includes('shovel');
+                }
+                return false;
+              });
+              if (tool) {
+                try {
+                  await bot.equip(tool, 'hand');
+                } catch (e) {}
+              }
+            }
+
+            // Face the block precisely before digging
+            try {
+              await bot.lookAt(block.position.offset(0.5, 0.5, 0.5), true);
+            } catch (err) {}
+
+            this.emitChatMessage(botData.id, 'system', `⛏️ Kazılıyor: ${block.name}`);
+            await bot.dig(block, true);
           } else {
             await new Promise(r => setTimeout(r, 100));
           }
         } catch (e) {
-          await new Promise(r => setTimeout(r, 200));
+          if (e.message && e.message !== 'Digging interrupted') {
+            console.error('[Mining Loop Error]', e);
+          }
+          await new Promise(r => setTimeout(r, 300));
         }
       }
     };
