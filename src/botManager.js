@@ -365,13 +365,6 @@ class BotManager {
 
           // Advanced Plugins setup
           try {
-            const armorManager = require('mineflayer-armor-manager');
-            bot.loadPlugin(armorManager);
-          } catch (e) {
-            console.error('[BotManager] armor-manager plugin load failed:', e);
-          }
-
-          try {
             const autoeat = require('mineflayer-auto-eat').plugin;
             bot.loadPlugin(autoeat);
           } catch (e) {
@@ -392,13 +385,18 @@ class BotManager {
       bot.on('spawn', () => {
         this.emitChatMessage(botData.id, 'system', '🎮 Spawn noktasına ışınlandı.');
         
-        if (bot.autoEat) {
-          try {
-            bot.autoEat.enable();
-          } catch (e) {
-            console.error('[BotManager] Error enabling autoeat:', e);
+        // Delay any auto actions to avoid suspicious packets on lobby scanning phase
+        setTimeout(() => {
+          if (botData.status !== 'online') return;
+          if (bot.autoEat) {
+            try {
+              bot.autoEat.enable();
+              this.emitChatMessage(botData.id, 'system', '🍕 Otomatik yemek yeme aktif edildi.');
+            } catch (e) {
+              console.error('[BotManager] Error enabling autoeat:', e);
+            }
           }
-        }
+        }, 6000); // 6 seconds safe delay to pass lobby scans
 
         if (bot.inventory && !botData.inventoryListenerBound) {
           botData.inventoryListenerBound = true;
