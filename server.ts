@@ -370,44 +370,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ── Yapay Zeka AI Mesajı ─────────────────────────────────
-  socket.on('send-ai-message', async ({ botId, message }) => {
-    try {
-      const result = await botManager.handleAiMessage(botId, message);
-      if (!result.success) {
-        socket.emit('system-message', { type: 'error', text: result.message });
-      }
-    } catch (err) {
-      console.error('[Socket] send-ai-message hatası:', err);
-      socket.emit('system-message', { type: 'error', text: 'Yapay zeka asistanı çalışırken bir hata oluştu.' });
-    }
-  });
 
-  socket.on('clear-ai-history', ({ botId }) => {
-    try {
-      const result = botManager.clearAiHistory(botId);
-      socket.emit('system-message', {
-        type: result.success ? 'success' : 'error',
-        text: result.message
-      });
-      // Emit clear signal to client to empty the AI chat screen
-      socket.emit('ai-chat-cleared', { botId });
-    } catch (err) {
-      console.error('[Socket] clear-ai-history hatası:', err);
-    }
-  });
-
-  socket.on('update-ai-whitelist', ({ botId, whitelist }) => {
-    try {
-      const result = botManager.updateAiAuthorizedPlayers(botId, whitelist);
-      socket.emit('system-message', {
-        type: result.success ? 'success' : 'error',
-        text: result.message
-      });
-    } catch (err) {
-      console.error('[Socket] update-ai-whitelist hatası:', err);
-    }
-  });
 
   // ── Bağlantı Kopması ────────────────────────────────────────
   socket.on('disconnect', () => {

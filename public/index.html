@@ -2331,33 +2331,7 @@
         saveMessageToStorage(botId, type, text, timestamp, json);
       });
 
-      socket.on('ai-response-message', ({ botId, sender, text, feedback, isError }) => {
-        // Render command execution feedback
-        if (feedback && feedback.length > 0) {
-          feedback.forEach(f => {
-            if (f.success) {
-              appendAiChatMessage(botId, 'system', `🔧 <i>Komut çalıştırıldı: ${f.tool} (${JSON.stringify(f.args || {})})</i>`);
-            } else {
-              appendAiChatMessage(botId, 'system', `⚠️ <i style="color:var(--error);">Komut hatası: ${f.tool} - ${f.error}</i>`);
-            }
-          });
-        }
-        appendAiChatMessage(botId, sender, text, isError);
-      });
 
-      socket.on('ai-chat-cleared', ({ botId }) => {
-        const logs = document.getElementById('ai-logs-' + botId);
-        if (logs) {
-          logs.innerHTML = `
-            <div class="ai-chat-welcome" style="text-align:center; transform:translateY(30%); padding:20px; color:var(--text-muted); font-size:0.75rem;">
-              💬 <b>Gemini Akıllı Bot Asistanı</b><br>
-              Bota Türkçe talimatlar verin! <br>
-              Örn: <i>"zıpla"</i>, <i>"koş"</i>, <i>"konumunu kontrol et"</i>, <i>"sohbete selam yaz"</i>.<br>
-              <span style="display:inline-block; margin-top:8px; font-size:0.7rem; color:var(--accent);">Settings > Secrets panelinde "GEMINI_API_KEY" yüklü olmalıdır.</span>
-            </div>
-          `;
-        }
-      });
 
       socket.on('inventory-data', (data) => {
         if (!state.botInventories) state.botInventories = new Map();
@@ -2947,7 +2921,6 @@
           <button class="addon-tab" data-tab="radar" data-bot="${bot.id}">🗺️ Radar</button>
           <button class="addon-tab" data-tab="inventory-vis" data-bot="${bot.id}">🎒 Envanter</button>
           <button class="addon-tab" data-tab="console" data-bot="${bot.id}">📜 Konsol</button>
-          <button class="addon-tab" data-tab="ai" data-bot="${bot.id}">🧠 Yapay Zeka</button>
         </div>
 
         <!-- Tab 1: Controls -->
@@ -3037,52 +3010,6 @@
           <div class="bot-console" id="console-${bot.id}"></div>
         </div>
 
-        <!-- Tab 5: Yapay Zeka AI Controller -->
-        <div class="addon-pane hidden" id="pane-ai-${bot.id}">
-          <div class="ai-pane-wrapper" style="padding:12px; background:var(--bg-secondary); border-radius:8px; border:1px solid var(--border); display:flex; flex-direction:column; gap:8px;">
-            <div class="ai-chat-logs" id="ai-logs-${bot.id}" style="height:210px; overflow-y:auto; padding:10px; background:#0d1117; border-radius:6px; border:1px solid var(--border); font-size:0.8rem; display:flex; flex-direction:column; gap:8px; font-family:var(--font-mono, monospace);">
-              <div class="ai-chat-welcome" style="text-align:center; transform:translateY(30%); padding:20px; color:var(--text-muted); font-size:0.75rem;">
-                💬 <b>Gemini Akıllı Bot Asistanı</b><br>
-                Bota Türkçe talimatlar verin! <br>
-                Örn: <i>"zıpla"</i>, <i>"koş"</i>, <i>"konumunu kontrol et"</i>, <i>"sohbete selam yaz"</i>.<br>
-                <span style="display:inline-block; margin-top:8px; font-size:0.7rem; color:var(--accent);">Settings > Secrets panelinde "GEMINI_API_KEY" yüklü olmalıdır.</span>
-              </div>
-            </div>
-
-            <!-- Pre-made AI Commands -->
-            <div class="ai-quick-prompts" style="display:flex; flex-wrap:wrap; gap:4px; max-height: 60px; overflow-y: auto; padding: 2px;">
-              <button class="ai-quick-btn" data-bot="${bot.id}" data-prompt="Canını ve konumunu kontrol et" style="font-size:0.7rem; padding:4px 8px; background:var(--bg-tertiary); border:1px solid var(--border); border-radius:4px; color:var(--text-secondary); cursor:pointer; transition: all 0.2s;">❤️ Durum Kontrolü</button>
-              <button class="ai-quick-btn" data-bot="${bot.id}" data-prompt="Sunucudaki çevrimiçi oyuncuları listele" style="font-size:0.7rem; padding:4px 8px; background:var(--bg-tertiary); border:1px solid var(--border); border-radius:4px; color:var(--text-secondary); cursor:pointer; transition: all 0.2s;">👥 Oyuncuları Listele</button>
-              <button class="ai-quick-btn" data-bot="${bot.id}" data-prompt="3 saniye ileri koş ve zıpla" style="font-size:0.7rem; padding:4px 8px; background:var(--bg-tertiary); border:1px solid var(--border); border-radius:4px; color:var(--text-secondary); cursor:pointer; transition: all 0.2s;">🏃 İleri Koş &amp; Zıpla</button>
-              <button class="ai-quick-btn" data-bot="${bot.id}" data-prompt="Kuzey yönüne doğru dönüp bak" style="font-size:0.7rem; padding:4px 8px; background:var(--bg-tertiary); border:1px solid var(--border); border-radius:4px; color:var(--text-secondary); cursor:pointer; transition: all 0.2s;">🧭 Kuzeye Bak</button>
-              <button class="ai-quick-btn" data-bot="${bot.id}" data-prompt="Sohbete 'Selamlar dostlar, ben Gemini AI tarafından kontrol edilen akıllı bir robotum!' yaz" style="font-size:0.7rem; padding:4px 8px; background:var(--bg-tertiary); border:1px solid var(--border); border-radius:4px; color:var(--text-secondary); cursor:pointer; transition: all 0.2s;">💬 Sohbete Yaz</button>
-              <button class="ai-quick-btn" data-bot="${bot.id}" data-prompt="Anti-AFK modunu aktifleştir" style="font-size:0.7rem; padding:4px 8px; background:var(--bg-tertiary); border:1px solid var(--border); border-radius:4px; color:var(--text-secondary); cursor:pointer; transition: all 0.2s;">🛡️ Anti-AFK Aç</button>
-            </div>
-
-            <!-- Whitelisted Players Config -->
-            <div style="background:var(--bg-tertiary); padding:8px 10px; border-radius:6px; border:1px solid var(--border); margin-top:2px; font-size:0.75rem;">
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; font-weight:bold; color:var(--accent);">
-                <span>👥 Oyun İçi Yetkili Oyuncular</span>
-                <span style="font-size:0.65rem; color:var(--text-muted); font-weight:normal;">Sadece listedekiler bota komut verebilir</span>
-              </div>
-              <div style="display:flex; gap:6px;">
-                <input type="text" id="ai-whitelist-${bot.id}" placeholder="Virgülle ayırın (Örn: sunay, pro_player)" value="${bot.aiAuthorizedPlayers || ''}" style="flex:1; border:1px solid var(--border); border-radius:4px; padding:4px 8px; background:var(--bg-secondary); color:var(--text-primary); font-size:0.75rem; outline:none;" />
-                <button class="btn-panel-action" id="ai-save-whitelist-btn-${bot.id}" style="background:var(--accent); color:black; font-weight:bold; border:none; border-radius:4px; padding:4px 10px; font-size:0.75rem; cursor:pointer;" data-bot="${bot.id}">Kaydet</button>
-              </div>
-              <div style="font-size:0.65rem; color:var(--text-muted); margin-top:3px; line-height:1.2;">
-                ⚠️ <b>Önemli:</b> Botun oyundan cevap vermesi için mesajda <u>botun isminin geçmesi</u> (örn: <i>"${bot.name} zıpla"</i>) ve yazan kişinin yukarıdaki listede olması gerekir.
-              </div>
-            </div>
-
-            <!-- Action Input Area -->
-            <div style="display:flex; gap:6px; align-items: center; margin-top: 2px;">
-              <input type="text" id="ai-input-${bot.id}" placeholder="Yapay zekaya yönlendirici yazın..." style="flex:1; border:1px solid var(--border); border-radius:4px; padding:6px 10px; background:var(--bg-tertiary); color:var(--text-primary); font-size:0.78rem; outline:none;" />
-              <button class="btn-panel-action" id="ai-send-btn-${bot.id}" style="background:var(--success); color:white; font-weight:bold; border:none; border-radius:4px; padding:6px 12px; font-size:0.78rem; cursor:pointer;" data-bot="${bot.id}">Gönder</button>
-              <button class="btn-panel-action danger" id="ai-clear-btn-${bot.id}" style="background:var(--error); border:none; color:white; border-radius:4px; padding:6px 10px; font-size:0.78rem; cursor:pointer;" title="Konuşmayı Sıfırla" data-bot="${bot.id}">🧹</button>
-            </div>
-          </div>
-        </div>
-
 
         <div class="bot-controls">
           <input type="text" placeholder="Mesaj yaz..." data-bot="${bot.id}" class="msg-input">
@@ -3147,77 +3074,6 @@
           }
         });
       }
-
-      // AI pane event listeners
-      const aiInput = card.querySelector('#ai-input-' + bot.id);
-      const aiSendBtn = card.querySelector('#ai-send-btn-' + bot.id);
-      const aiClearBtn = card.querySelector('#ai-clear-btn-' + bot.id);
-
-      function triggerSendAiMessage() {
-        if (!aiInput) return;
-        const text = aiInput.value.trim();
-        if (!text) return;
-
-        appendAiChatMessage(bot.id, 'user', text);
-        aiInput.value = '';
-
-        if (!isOfflineMode && socket && typeof socket.emit === 'function') {
-          socket.emit('send-ai-message', { botId: bot.id, message: text });
-          appendAiChatMessage(bot.id, 'system', '🕒 <i>Yapay zeka analiz ediyor ve karar veriyor...</i>');
-        } else {
-          setTimeout(() => {
-            appendAiChatMessage(bot.id, 'ai', 'Çevrimdışı moddasınız. Gerçek yapay zeka entegrasyonu için botu sunucuya bağlayın.');
-          }, 850);
-        }
-      }
-
-      if (aiSendBtn) {
-        aiSendBtn.addEventListener('click', triggerSendAiMessage);
-      }
-      if (aiInput) {
-        aiInput.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter') {
-            triggerSendAiMessage();
-          }
-        });
-      }
-      if (aiClearBtn) {
-        aiClearBtn.addEventListener('click', () => {
-          if (!isOfflineMode && socket && typeof socket.emit === 'function') {
-            socket.emit('clear-ai-history', { botId: bot.id });
-          } else {
-            const logs = document.getElementById('ai-logs-' + bot.id);
-            if (logs) logs.innerHTML = '';
-            showToast('success', 'AI yazışmaları sıfırlandı.');
-          }
-        });
-      }
-
-      // Whitelist save handler
-      const aiWhitelistInput = card.querySelector('#ai-whitelist-' + bot.id);
-      const aiSaveWhitelistBtn = card.querySelector('#ai-save-whitelist-btn-' + bot.id);
-
-      if (aiSaveWhitelistBtn && aiWhitelistInput) {
-        aiSaveWhitelistBtn.addEventListener('click', () => {
-          const val = aiWhitelistInput.value.trim();
-          if (!isOfflineMode && socket && typeof socket.emit === 'function') {
-            socket.emit('update-ai-whitelist', { botId: bot.id, whitelist: val });
-          } else {
-            showToast('warning', 'Yapay zeka ayarları sadece çevrimiçi modda güncellenebilir.');
-          }
-        });
-      }
-
-      // Quick prompts click handler
-      card.querySelectorAll('.ai-quick-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const prompt = btn.dataset.prompt;
-          if (aiInput) {
-            aiInput.value = prompt;
-            triggerSendAiMessage();
-          }
-        });
-      });
 
       card.querySelector('[data-action="remove"]').addEventListener('click', () => {
         if (!isOfflineMode && socket && typeof socket.emit === 'function') {
@@ -3705,11 +3561,7 @@
       if (statusText) statusText.textContent = statusLabel;
       if (nameEl) nameEl.textContent = bot.name;
 
-      // Update whitelist value if not focused
-      const aiWhitelistInput = card.querySelector('#ai-whitelist-' + bot.id);
-      if (aiWhitelistInput && document.activeElement !== aiWhitelistInput) {
-        aiWhitelistInput.value = bot.aiAuthorizedPlayers || '';
-      }
+
 
       const coordsEl = card.querySelector('#coords-' + bot.id);
       if (coordsEl && bot.x !== null) {
@@ -3959,48 +3811,7 @@
       }
     }
 
-    function appendAiChatMessage(botId, role, text, isError = false) {
-      const logs = document.getElementById('ai-logs-' + botId);
-      if (!logs) return;
 
-      // Remove welcome/placeholder text on first real message
-      const welcome = logs.querySelector('.ai-chat-welcome');
-      if (welcome) welcome.remove();
-
-      const msgDiv = document.createElement('div');
-      msgDiv.className = 'ai-msg-bubble';
-      msgDiv.style.padding = '8px 12px';
-      msgDiv.style.borderRadius = '8px';
-      msgDiv.style.maxWidth = '85%';
-      msgDiv.style.fontSize = '0.78rem';
-      msgDiv.style.lineHeight = '1.3';
-      msgDiv.style.wordBreak = 'break-word';
-      msgDiv.style.display = 'block';
-
-      if (role === 'user') {
-        msgDiv.style.alignSelf = 'flex-end';
-        msgDiv.style.background = '#21262d';
-        msgDiv.style.color = '#e6edf3';
-        msgDiv.style.border = '1px solid var(--border)';
-        msgDiv.innerHTML = `<b>Sen:</b> ${escapeHtml(text)}`;
-      } else if (role === 'system') {
-        msgDiv.style.alignSelf = 'center';
-        msgDiv.style.background = 'transparent';
-        msgDiv.style.color = 'var(--text-muted)';
-        msgDiv.style.fontSize = '0.7rem';
-        msgDiv.style.textAlign = 'center';
-        msgDiv.innerHTML = text;
-      } else {
-        msgDiv.style.alignSelf = 'flex-start';
-        msgDiv.style.background = isError ? 'rgba(248, 81, 73, 0.15)' : 'rgba(56, 139, 253, 0.15)';
-        msgDiv.style.color = isError ? '#ff7b72' : '#58a6ff';
-        msgDiv.style.border = isError ? '1px solid #f85149' : '1px solid rgba(56,139,253,0.4)';
-        msgDiv.innerHTML = `<b>🤖 Yapay Zeka:</b> ${escapeHtml(text)}`;
-      }
-
-      logs.appendChild(msgDiv);
-      logs.scrollTop = logs.scrollHeight;
-    }
 
     // ── Look Pad ─────────────────────────────────────────────
     function initLookPad(canvas, botId) {
