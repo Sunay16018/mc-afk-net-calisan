@@ -127,7 +127,8 @@ class BotManager {
         version: data.version,
         hasProxy: data.hasProxy,
         antiAfkEnabled: data.antiAfk ? data.antiAfk.isRunning : false,
-        playerCount: data.players ? data.players.length : 0
+        playerCount: data.players ? data.players.length : 0,
+        aiAuthorizedPlayers: data.aiAuthorizedPlayers || ''
       });
     }
     return bots;
@@ -365,7 +366,8 @@ class BotManager {
 
           // Advanced Plugins setup
           try {
-            const autoeat = require('mineflayer-auto-eat');
+            const autoeatModule = require('mineflayer-auto-eat');
+            const autoeat = autoeatModule.plugin || autoeatModule;
             bot.loadPlugin(autoeat);
           } catch (e) {
             console.error('[BotManager] auto-eat plugin load failed:', e);
@@ -413,6 +415,32 @@ class BotManager {
       bot.on('chat', (username, message) => {
         if (username === bot.username) return;
         this.emitChatMessage(botData.id, 'chat', `[${username}] ${message}`);
+        
+        // Oyun içi chat üzerinden AI tetikleme kuralları:
+        // 1. Mesajda botun ismi (username) geçiyor olmalı.
+        const botName = bot.username || botData.name;
+        const msgLower = message.toLowerCase();
+        
+        if (msgLower.includes(botName.toLowerCase())) {
+          // 2. Yetkili oyuncular listesi kontrolü.
+          const authString = botData.aiAuthorizedPlayers || '';
+          const authorizedUsers = authString
+            .split(',')
+            .map(s => s.trim().toLowerCase())
+            .filter(Boolean);
+
+          const senderLower = username.toLowerCase();
+          
+          if (authorizedUsers.length > 0 && !authorizedUsers.includes(senderLower)) {
+            // Liste dolu ama yazan kişi yetkili değilse işlem yapma.
+            console.log(`[AI Engellendi] Oyun içi sohbetten ${username} bota komut vermeye çalıştı fakat yetki listesinde değil.`);
+            return;
+          }
+
+          // Eğer liste boşsa veya liste dolup yazan kişi listedeyse AI'ı tetikle:
+          const messageWithMetadata = `[Sunucu Sohbeti - Gönderen: ${username}] ${message}`;
+          this.handleAiMessage(botData.id, messageWithMetadata).catch(err => console.error('[AI Chat Error]', err));
+        }
       });
 
       bot.on('message', (jsonMsg, position) => {
@@ -638,6 +666,97 @@ class BotManager {
       return { success: true };
     } catch (err) {
       return { success: false, message: `Hareket hatası: ${err.message}` };
+    }
+  }
+
+  _getRelativeTargetPosition(bot, direction, blocks) {
+    const yaw = bot.entity.yaw;
+    let dx = 0;
+    let dz = 0;
+
+    // Unit vector of look direction (forward)
+    const forwardX = -Math.sin(yaw);
+    const forwardZ = -Math.cos(yaw);
+
+    // Unit vector of right direction (90 degrees right of forward)
+    const rightX = -Math.sin(yaw - Math.PI / 2);
+    const rightZ = -Math.cos(yaw - Math.PI / 2);
+
+    if (direction === 'forward') {
+      dx = forwardX * blocks;
+      dz = forwardZ * blocks;
+    } else if (direction === 'back') {
+      dx = -forwardX * blocks;
+      dz = -forwardZ * blocks;
+    } else if (direction === 'right') {
+      dx = rightX * blocks;
+      dz = rightZ * blocks;
+    } else if (direction === 'left') {
+      dx = -rightX * blocks;
+      dz = -rightZ * blocks;
+    }
+
+    const targetPos = bot.entity.position.offset(dx, 0, dz);
+    return targetPos;
+  }
+
+  async navigateToPosition(botId, targetPos, timeoutMs = 15000) {
+    const botData = this.bots.get(botId);
+    if (!botData || !botData.instance) return { success: false, message: 'Bot bulunamadı veya çevrimdışı.' };
+    const bot = botData.instance;
+
+    // Remove any previous active pathfinder goals
+    try {
+      if (bot.pathfinder) {
+        bot.pathfinder.setGoal(null);
+      }
+    } catch (e) {}
+
+    if (bot.pathfinder) {
+      try {
+        const { GoalNear } = require('mineflayer-pathfinder').goals;
+        bot.pathfinder.setGoal(new GoalNear(targetPos.x, targetPos.y, targetPos.z, 1.2));
+        
+        const startTime = Date.now();
+        while (botData.status === 'online') {
+          await new Promise(resolve => setTimeout(resolve, 200));
+          const dist = bot.entity.position.distanceTo(targetPos);
+          if (dist <= 1.5) {
+            break;
+          }
+          if (Date.now() - startTime > timeoutMs) {
+            break;
+          }
+        }
+        bot.pathfinder.setGoal(null);
+        return { success: true, message: `Hedefe ulaşıldı. Kapanış mesafesi: ${Math.round(bot.entity.position.distanceTo(targetPos))} blok.` };
+      } catch (err) {
+        console.error('[AI Navigation Error] Pathfinder failed, falling back to manual walk:', err);
+      }
+    }
+
+    // Manual fallback walk:
+    try {
+      bot.setControlState('forward', true);
+      const startTime = Date.now();
+      while (botData.status === 'online') {
+        const dist = bot.entity.position.distanceTo(targetPos);
+        if (dist <= 1.5) break;
+        if (Date.now() - startTime > timeoutMs) break;
+
+        // Face the target position manually & seamlessly
+        const dx = targetPos.x - bot.entity.position.x;
+        const dz = targetPos.z - bot.entity.position.z;
+        const yaw = Math.atan2(-dx, -dz);
+        bot.look(yaw, 0, true);
+        
+        await new Promise(resolve => setTimeout(resolve, 150));
+      }
+      bot.setControlState('forward', false);
+      return { success: true, message: `Manual hareket tamamlandı. Kalan mesafe: ${Math.round(bot.entity.position.distanceTo(targetPos))} blok.` };
+    } catch (err) {
+      try { bot.setControlState('forward', false); } catch (e) {}
+      return { success: false, error: err.message };
     }
   }
 
@@ -1294,6 +1413,368 @@ class BotManager {
   }
 
   // ── Socket.io Yayınları ─────────────────────────────────────
+
+  async handleAiMessage(botId, message) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return { 
+        success: false, 
+        message: 'Lütfen Google AI Studio Secrets panelinden GEMINI_API_KEY ortam değişkenini tanımlayın.' 
+      };
+    }
+
+    const botData = this.bots.get(botId);
+    if (!botData) {
+      return { success: false, message: 'Bot bulunamadı.' };
+    }
+
+    try {
+      // Dynamic import GoogleGenAI
+      const { GoogleGenAI, Type } = await import('@google/genai');
+      const ai = new GoogleGenAI({
+        apiKey: apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build'
+          }
+        }
+      });
+
+      botData.aiHistory = botData.aiHistory || [];
+      botData.aiHistory.push({ role: 'user', parts: [{ text: message }] });
+
+      // Clean up old history if excessively long
+      if (botData.aiHistory.length > 40) {
+        botData.aiHistory = botData.aiHistory.slice(-40);
+      }
+
+      // Define our Minecraft tool declarations using type schema
+      const toolsDeclarations = [
+        {
+          name: 'move_bot_by_blocks',
+          description: 'Moves the bot in a relative direction (forward, back, left, right) by a specific number of blocks. Navigates smoothly using automated movement.',
+          parameters: {
+            type: Type.OBJECT,
+            properties: {
+              direction: { type: Type.STRING, enum: ['forward', 'back', 'left', 'right'], description: 'The direction relative to bot\'s view.' },
+              blocks: { type: Type.NUMBER, description: 'The exact number of blocks to walk (e.g., 5 or 10).' }
+            },
+            required: ['direction', 'blocks']
+          }
+        },
+        {
+          name: 'move_to_coordinates',
+          description: 'Navigates the bot to exact 3D coordinates (X, Y, Z) in the Minecraft server using automated navigation.',
+          parameters: {
+            type: Type.OBJECT,
+            properties: {
+              x: { type: Type.NUMBER, description: 'Target X coordinate' },
+              y: { type: Type.NUMBER, description: 'Target Y coordinate' },
+              z: { type: Type.NUMBER, description: 'Target Z coordinate' }
+            },
+            required: ['x', 'y', 'z']
+          }
+        },
+        {
+          name: 'get_bot_info',
+          description: 'Gets current coordinates, food level, saturation, health, xp, level, current look yaw/pitch, and nearby entities (mobs/players).',
+          parameters: { type: Type.OBJECT, properties: {} }
+        },
+        {
+          name: 'send_chat_message',
+          description: 'Sends a chat message in the Minecraft server chat.',
+          parameters: {
+            type: Type.OBJECT,
+            properties: {
+              message: { type: Type.STRING, description: 'The text message to chat.' }
+            },
+            required: ['message']
+          }
+        },
+        {
+          name: 'move_bot',
+          description: 'Presses or releases a direction key (forward, back, left, right). Use state=true to press, state=false to release/stop.',
+          parameters: {
+            type: Type.OBJECT,
+            properties: {
+              direction: { type: Type.STRING, enum: ['forward', 'back', 'left', 'right'], description: 'The direction key.' },
+              state: { type: Type.BOOLEAN, description: 'true to start moving, false to stop.' }
+            },
+            required: ['direction', 'state']
+          }
+        },
+        {
+          name: 'jump_bot',
+          description: 'Triggers the bot to jump once.',
+          parameters: { type: Type.OBJECT, properties: {} }
+        },
+        {
+          name: 'sneak_bot',
+          description: 'Sets sneak state for the bot.',
+          parameters: {
+            type: Type.OBJECT,
+            properties: {
+              enabled: { type: Type.BOOLEAN, description: 'true to sneak, false to unsneak.' }
+            },
+            required: ['enabled']
+          }
+        },
+        {
+          name: 'sprint_bot',
+          description: 'Sets sprint state for the bot.',
+          parameters: {
+            type: Type.OBJECT,
+            properties: {
+              enabled: { type: Type.BOOLEAN, description: 'true to sprint, false to walk.' }
+            },
+            required: ['enabled']
+          }
+        },
+        {
+          name: 'look_at',
+          description: 'Looks at a specified orientation cardinal direction (north, south, east, west, up, down).',
+          parameters: {
+            type: Type.OBJECT,
+            properties: {
+              direction: { type: Type.STRING, enum: ['north', 'south', 'east', 'west', 'up', 'down'], description: 'Cardinal direction.' }
+            },
+            required: ['direction']
+          }
+        },
+        {
+          name: 'toggle_mining',
+          description: 'Starts or stops automatic mining/digging of blocks in front of the bot.',
+          parameters: {
+            type: Type.OBJECT,
+            properties: {
+              enabled: { type: Type.BOOLEAN, description: 'true to start mining, false to stop.' }
+            },
+            required: ['enabled']
+          }
+        },
+        {
+          name: 'toggle_anti_afk',
+          description: 'Enables or disables Anti-AFK engine which keeps the bot active and jumping so they do not time out.',
+          parameters: {
+            type: Type.OBJECT,
+            properties: {
+              enabled: { type: Type.BOOLEAN, description: 'true to enable anti-afk, false to disable.' }
+            },
+            required: ['enabled']
+          }
+        },
+        {
+          name: 'get_player_list',
+          description: 'Fetches the list of currently connected players on the server.',
+          parameters: { type: Type.OBJECT, properties: {} }
+        }
+      ];
+
+      const systemInstruction = `You are a helpful and smart AI companion controlling a Minecraft player bot.
+Your display name is "Yapay Zeka" (Gemini AI).
+The user can talk to you and direct the bot's action in Turkish.
+When users ask simple questions, respond to them.
+When they tell you to perform an action (like moving, jumping, chatting in-game, showing player lists, active checks), call the corresponding tool immediately!
+You can execute multiple tools in sequence if requested.
+Always respond in Turkish. Keep your tone cheerful, helpful, and adventurous! Refer to the bot of name: "${botData.name}".`;
+
+      let response = await ai.models.generateContent({
+        model: 'gemini-3.5-flash',
+        contents: botData.aiHistory,
+        config: {
+          systemInstruction,
+          tools: [{ functionDeclarations: toolsDeclarations }]
+        }
+      });
+
+      // Loop to handle potential multiple sequential function calls or simple tool calls
+      let executionFeedback = [];
+      let loops = 0;
+      
+      while (loops < 5 && response.functionCalls && response.functionCalls.length > 0) {
+        const functionCalls = response.functionCalls;
+        const toolResultsParts = [];
+
+        // Add model's choice to history
+        botData.aiHistory.push(response.candidates[0].content);
+
+        for (const call of functionCalls) {
+          const { name, args, id } = call;
+          let result;
+          try {
+            result = await this._executeAiTool(botId, name, args);
+            executionFeedback.push({ tool: name, args, success: true, result });
+          } catch (err) {
+            result = { success: false, error: err.message };
+            executionFeedback.push({ tool: name, args, success: false, error: err.message });
+          }
+
+          toolResultsParts.push({
+            functionResponse: {
+              name,
+              response: result,
+              id
+            }
+          });
+        }
+
+        // Add tools' outputs
+        botData.aiHistory.push({
+          role: 'tool',
+          parts: toolResultsParts
+        });
+
+        // Get final/next answer from Gemini with context
+        response = await ai.models.generateContent({
+          model: 'gemini-3.5-flash',
+          contents: botData.aiHistory,
+          config: {
+            systemInstruction,
+            tools: [{ functionDeclarations: toolsDeclarations }]
+          }
+        });
+
+        loops++;
+      }
+
+      let finalResponseText = response.text;
+      if (!finalResponseText) {
+        if (executionFeedback.length > 0) {
+          finalResponseText = 'İstediğin komutları bota ileterek başarıyla uyguladım! 🚀';
+        } else {
+          finalResponseText = 'Anlaşılamadı. Lütfen ne yapmamı istediğinizi daha açık belirtir misiniz?';
+        }
+      }
+      
+      // Store Gemini's model output in history
+      botData.aiHistory.push({
+        role: 'model',
+        parts: [{ text: finalResponseText }]
+      });
+
+      // Emit feedback loop to front-end
+      this.io.emit('ai-response-message', {
+        botId,
+        sender: 'ai',
+        text: finalResponseText,
+        feedback: executionFeedback
+      });
+
+      return { success: true };
+    } catch (err) {
+      console.error('[AI Manager] Error:', err);
+      this.io.emit('ai-response-message', {
+        botId,
+        sender: 'ai',
+        text: `⚠️ Üzgünüm, yapay zekaya komut gönderirken bir hata oluştu: ${err.message}`,
+        isError: true
+      });
+      return { success: false, message: err.message };
+    }
+  }
+
+  async _executeAiTool(botId, name, args) {
+    console.log(`[AI Executing Tool] Bot: ${botId}, Tool: ${name}`, args);
+    const botData = this.bots.get(botId);
+    if (!botData || !botData.instance) return { success: false, error: 'Bot is offline/unavailable' };
+    const bot = botData.instance;
+
+    switch (name) {
+      case 'get_bot_info':
+        const stats = this._getBotStats(botData);
+        // Also add current hold item and equipment
+        const heldItem = bot.heldItem ? { name: bot.heldItem.name, count: bot.heldItem.count } : null;
+        return {
+          success: true,
+          stats,
+          inventoryUnits: bot.inventory ? bot.inventory.items().length : 0,
+          heldItem
+        };
+
+      case 'send_chat_message':
+        this.sendMessage(botId, args.message);
+        return { success: true, messageSent: args.message };
+
+      case 'move_bot':
+        this.handleBotMove(botId, args.direction, args.state);
+        return { success: true, direction: args.direction, state: args.state };
+
+      case 'move_bot_by_blocks': {
+        const direction = args.direction || 'forward';
+        const blocks = Number(args.blocks) || 1;
+        const targetPos = this._getRelativeTargetPosition(bot, direction, blocks);
+        return await this.navigateToPosition(botId, targetPos);
+      }
+
+      case 'move_to_coordinates': {
+        const targetPos = new (require('vec3'))(Number(args.x), Number(args.y), Number(args.z));
+        return await this.navigateToPosition(botId, targetPos);
+      }
+
+      case 'jump_bot':
+        bot.setControlState('jump', true);
+        setTimeout(() => {
+          if (botData.instance) bot.setControlState('jump', false);
+        }, 400);
+        return { success: true, action: 'Jump triggered' };
+
+      case 'sneak_bot':
+        this.handleBotMove(botId, 'sneak', args.enabled);
+        return { success: true, sneakEnabled: args.enabled };
+
+      case 'sprint_bot':
+        this.handleBotMove(botId, 'sprint', args.enabled);
+        return { success: true, sprintEnabled: args.enabled };
+
+      case 'look_at':
+        let yaw = 0;
+        let pitch = 0;
+        // Direction map
+        if (args.direction === 'north') yaw = Math.PI;
+        else if (args.direction === 'south') yaw = 0;
+        else if (args.direction === 'east') yaw = -Math.PI / 2;
+        else if (args.direction === 'west') yaw = Math.PI / 2;
+        else if (args.direction === 'up') pitch = Math.PI / 2;
+        else if (args.direction === 'down') pitch = -Math.PI / 2;
+
+        bot.look(yaw, pitch, true);
+        return { success: true, direction: args.direction, yaw, pitch };
+
+      case 'toggle_mining':
+        this.handleBotMove(botId, args.enabled ? 'startMining' : 'stopMining');
+        return { success: true, miningActive: args.enabled };
+
+      case 'toggle_anti_afk':
+        this.toggleAntiAfk(botId, args.enabled);
+        return { success: true, antiAfkState: args.enabled };
+
+      case 'get_player_list':
+        const plist = this.getPlayerList(botId);
+        return plist;
+
+      default:
+        throw new Error(`Unrecognized tool name: ${name}`);
+    }
+  }
+
+  clearAiHistory(botId) {
+    const botData = this.bots.get(botId);
+    if (botData) {
+      botData.aiHistory = [];
+      return { success: true, message: 'Yarıda kalan AI konuşma geçmişi sıfırlandı.' };
+    }
+    return { success: false, message: 'Bot bulunamadı.' };
+  }
+
+  updateAiAuthorizedPlayers(botId, playersString) {
+    const botData = this.bots.get(botId);
+    if (botData) {
+      botData.aiAuthorizedPlayers = playersString;
+      this.emitBotUpdate();
+      return { success: true, message: `Oyun içi yetkili oyuncular güncellendi: ${playersString || '(Boş)'}` };
+    }
+    return { success: false, message: 'Bot bulunamadı.' };
+  }
 
   emitBotUpdate() {
     this.io.emit('bot-update', this.getAllBots());

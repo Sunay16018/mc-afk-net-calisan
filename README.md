@@ -1,20 +1,20 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+---
+title: Minecraft AFK Client
+emoji: 🤖
+colorFrom: green
+colorTo: blue
+sdk: docker
+app_port: 3000
+pinned: false
+---
 
-# Run and deploy your AI Studio app
+# Minecraft AFK Client v3
 
-This contains everything you need to run your app locally.
+Minecraft AFK Bot manager website using Mineflayer, Express, and Socket.io.
 
-View your app in AI Studio: https://ai.studio/apps/34cc468e-3da0-4190-954d-57ebdc87bb8e
-
-## Run Locally
-
-**Prerequisites:**  Node.js
-
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## Features
+- Bot coordinates, health, and foods status tracking
+- Fully functional in-app custom controls & script engine
+- AI model integrations
+- Server Browser info and statistics
+- Proxy support
