@@ -2309,6 +2309,9 @@
           if (existing && existing.antiAfkEnabled !== bot.antiAfkEnabled) {
             updateAntiAfkButton(bot.id, bot.antiAfkEnabled);
           }
+          if (existing && existing.autoReconnectEnabled !== bot.autoReconnectEnabled) {
+            updateAutoReconnectButton(bot.id, bot.autoReconnectEnabled);
+          }
         }
 
         updateServersFromBots();
@@ -2890,6 +2893,7 @@
             <button class="btn-icon" title="Envanter" data-action="inventory" data-bot="${bot.id}">🎒</button>
             <button class="btn-icon" title="Oyuncu Listesi" data-action="players" data-bot="${bot.id}">👥</button>
             <button class="btn-icon ${bot.antiAfkEnabled ? 'active' : ''}" title="Anti-AFK" data-action="antiafk" data-bot="${bot.id}" id="afk-btn-${bot.id}">🛡️</button>
+            <button class="btn-icon ${bot.autoReconnectEnabled !== false ? 'active' : ''}" title="Otomatik Yeniden Bağlan" data-action="autoreconnect" data-bot="${bot.id}" id="autoreconnect-btn-${bot.id}">🔄</button>
             <button class="btn-icon ${bot.consoleMuted ? 'muted-btn' : ''}" title="Konsol Mesajlarını Sustur/Aç" data-action="mute-console" data-bot="${bot.id}" id="mute-btn-${bot.id}">🔇</button>
             <button class="btn-icon danger" title="Botu Çıkar" data-action="remove" data-bot="${bot.id}">🗑️</button>
           </div>
@@ -3108,7 +3112,8 @@
       });
 
       card.querySelector('[data-action="antiafk"]').addEventListener('click', () => {
-        const newState = !bot.antiAfkEnabled;
+        const currentBot = state.bots.get(bot.id) || bot;
+        const newState = !currentBot.antiAfkEnabled;
         if (!isOfflineMode && socket && typeof socket.emit === 'function') {
           socket.emit('toggle-antiafk', { botId: bot.id, enabled: newState });
         } else {
@@ -3118,6 +3123,19 @@
           const now = new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
           addConsoleMessage(bot.id, 'system', `Anti-AFK ${newState ? 'aktif' : 'devre dışı'} (Çevrimdışı)`, now);
           showToast('success', `Anti-AFK ${newState ? 'aktif' : 'devre dışı'} (Çevrimdışı mod)`);
+        }
+      });
+
+      card.querySelector('[data-action="autoreconnect"]').addEventListener('click', () => {
+        const currentBot = state.bots.get(bot.id) || bot;
+        const newState = currentBot.autoReconnectEnabled === false ? true : false;
+        if (!isOfflineMode && socket && typeof socket.emit === 'function') {
+          socket.emit('toggle-autoreconnect', { botId: bot.id, enabled: newState });
+        } else {
+          // Çevrimdışı mod - yerel toggle
+          bot.autoReconnectEnabled = newState;
+          updateAutoReconnectButton(bot.id, newState);
+          showToast('success', `Otomatik yeniden bağlanma ${newState ? 'aktif' : 'devre dışı'} (Çevrimdışı mod)`);
         }
       });
 
@@ -3569,6 +3587,7 @@
       }
 
       updateAntiAfkButton(bot.id, bot.antiAfkEnabled);
+      updateAutoReconnectButton(bot.id, bot.autoReconnectEnabled);
     }
 
     function updateBotStats(botData) {
@@ -3595,6 +3614,11 @@
     function updateAntiAfkButton(botId, enabled) {
       const btn = document.getElementById('afk-btn-' + botId);
       if (btn) btn.classList.toggle('active', enabled);
+    }
+
+    function updateAutoReconnectButton(botId, enabled) {
+      const btn = document.getElementById('autoreconnect-btn-' + botId);
+      if (btn) btn.classList.toggle('active', enabled !== false);
     }
 
     const MC_COLORS = {
@@ -3643,10 +3667,38 @@
 
     function parseMinecraftCodes(str) {
       if (!str) return '';
-      let working = escapeHtml(str);
-      const parts = working.split('§');
-      if (parts.length === 1) return parts[0];
       
+      // Store safe span tags in a temporary list to bypass HTML escaping safely
+      const placeholders = [];
+      let working = str;
+      
+      // Pattern to match safe span tags with style="color:..." or style="font-weight:..." or similar
+      const spanRegex = /<span\s+style="([^"]*)"\s*>/gi;
+      working = working.replace(spanRegex, (match, styleContent) => {
+        // Validate styleContent for safety (only color, font-weight, font-style, text-decoration)
+        const isSafe = /^[a-zA-Z0-9\s#():;,-]+$/.test(styleContent) && 
+                       !styleContent.toLowerCase().includes('expression') && 
+                       !styleContent.toLowerCase().includes('javascript') &&
+                       !styleContent.toLowerCase().includes('behavior');
+        if (isSafe) {
+          const placeholder = `__SPAN_PLACEHOLDER_${placeholders.length}__`;
+          placeholders.push(`<span style="${styleContent}">`);
+          return placeholder;
+        }
+        return match;
+      });
+      
+      // Also match </span> closing tags
+      working = working.replace(/<\/span>/gi, (match) => {
+        const placeholder = `__SPAN_PLACEHOLDER_${placeholders.length}__`;
+        placeholders.push('</span>');
+        return placeholder;
+      });
+      
+      // Now safe escape HTML of the rest
+      working = escapeHtml(working);
+      
+      const parts = working.split('§');
       let html = parts[0];
       let currentStyles = {
         color: null,
@@ -3718,6 +3770,12 @@
       }
       
       html += closeAll();
+      
+      // Restore the safe placeholders
+      for (let i = 0; i < placeholders.length; i++) {
+        html = html.replace(`__SPAN_PLACEHOLDER_${i}__`, placeholders[i]);
+      }
+      
       return html;
     }
 
@@ -3751,13 +3809,34 @@
       
       let cleanText = comp.text || '';
       if (comp.translate) {
-        cleanText = comp.translate;
+        let template = comp.translate;
+        if (template === 'chat.type.text' || template === 'chat.type.announcement') {
+          template = '<%s> %s';
+        } else if (template === 'chat.type.emote') {
+          template = '* %s %s';
+        } else if (template === 'multiplayer.player.joined') {
+          template = '%s joined the game';
+        } else if (template === 'multiplayer.player.left') {
+          template = '%s left the game';
+        }
+        
         if (comp.with && Array.isArray(comp.with)) {
-          cleanText += " " + comp.with.map(x => typeof x === 'object' ? parseMinecraftJson(x) : String(x)).join(' ');
+          let formatted = template;
+          for (const arg of comp.with) {
+            const argHtml = parseMinecraftJson(arg);
+            if (formatted.includes('%s')) {
+              formatted = formatted.replace('%s', argHtml);
+            } else {
+              formatted += ' ' + argHtml;
+            }
+          }
+          cleanText = formatted;
+        } else {
+          cleanText = template;
         }
       }
       
-      let innerHtml = parseMinecraftCodes(cleanText);
+      let innerHtml = (comp.translate && comp.with) ? cleanText : parseMinecraftCodes(cleanText);
       let textHtml = '';
       
       if (styleStr && innerHtml.length > 0) {

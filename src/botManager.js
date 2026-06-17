@@ -44,9 +44,30 @@ function cleanMcJsonToText(comp) {
   }
   let out = comp.text || '';
   if (comp.translate) {
-    out = comp.translate;
+    let template = comp.translate;
+    if (template === 'chat.type.text' || template === 'chat.type.announcement') {
+      template = '<%s> %s';
+    } else if (template === 'chat.type.emote') {
+      template = '* %s %s';
+    } else if (template === 'multiplayer.player.joined') {
+      template = '%s joined the game';
+    } else if (template === 'multiplayer.player.left') {
+      template = '%s left the game';
+    }
+    
     if (comp.with && Array.isArray(comp.with)) {
-      out += ' ' + comp.with.map(cleanMcJsonToText).join(' ');
+      let formatted = template;
+      for (const arg of comp.with) {
+        const argText = cleanMcJsonToText(arg);
+        if (formatted.includes('%s')) {
+          formatted = formatted.replace('%s', argText);
+        } else {
+          formatted += ' ' + argText;
+        }
+      }
+      out = formatted;
+    } else {
+      out = template;
     }
   }
   if (comp.extra && Array.isArray(comp.extra)) {
@@ -126,7 +147,8 @@ class BotManager {
         serverKey: data.serverKey,
         version: data.version,
         hasProxy: data.hasProxy,
-        antiAfkEnabled: data.antiAfk ? data.antiAfk.isRunning : false,
+        antiAfkEnabled: data.antiAfk ? data.antiAfk.isRunning : (data.antiAfkActivePreference || false),
+        autoReconnectEnabled: data.autoReconnectEnabled !== false,
         playerCount: data.players ? data.players.length : 0
       });
     }
@@ -149,7 +171,8 @@ class BotManager {
         serverKey: data.serverKey,
         version: data.version,
         hasProxy: data.hasProxy,
-        antiAfkEnabled: data.antiAfk ? data.antiAfk.isRunning : false,
+        antiAfkEnabled: data.antiAfk ? data.antiAfk.isRunning : (data.antiAfkActivePreference || false),
+        autoReconnectEnabled: data.autoReconnectEnabled !== false,
         playerCount: data.players ? data.players.length : 0,
         ...stats
       });
@@ -281,7 +304,8 @@ class BotManager {
       players: [],
       antiAfk: null,
       instance: null,
-      connectTimeout: null
+      connectTimeout: null,
+      autoReconnectEnabled: true
     };
 
     this.bots.set(botId, botData);
@@ -300,6 +324,17 @@ class BotManager {
 
   async _connectBot(botData) {
     const { serverIp, serverPort, name, version, proxyConfig } = botData;
+
+    // Temizleme: Eski bot örneği varsa sızmaları önlemek için sıfırla
+    if (botData.instance) {
+      try {
+        botData.instance.removeAllListeners();
+        botData.instance.end();
+      } catch (_) {}
+      botData.instance = null;
+    }
+
+    botData.inventoryListenerBound = false;
 
     return new Promise((resolve, reject) => {
       let resolved = false;
@@ -362,6 +397,17 @@ class BotManager {
           this.emitChatMessage(botData.id, 'system', '✅ Sunucuya giriş yapıldı.');
 
           botData.antiAfk = new AntiAfk(bot);
+
+          // Eğer antiAFK tercih edilmişse otomatik geri yükle (6.5 sn gecikmeli ki lobiden geçsin)
+          if (botData.antiAfkActivePreference) {
+            setTimeout(() => {
+              if (botData.status === 'online' && botData.antiAfk) {
+                botData.antiAfk.start();
+                this.emitChatMessage(botData.id, 'system', '🛡️ Anti-AFK otomatik olarak yeniden başlatıldı.');
+                this.emitBotUpdate();
+              }
+            }, 6500);
+          }
 
           // Advanced Plugins setup
           import('mineflayer-auto-eat').then((autoeatModule) => {
@@ -455,6 +501,8 @@ class BotManager {
         botData.status = 'error';
         this.emitChatMessage(botData.id, 'error', `🚫 Sunucudan atıldı: ${reasonText}`);
         this.emitBotUpdate();
+
+        this._triggerAutoReconnect(botData);
       });
 
       bot.on('error', (err) => {
@@ -468,6 +516,8 @@ class BotManager {
           clearTimeout(botData.connectTimeout);
           reject(err);
         }
+
+        this._triggerAutoReconnect(botData);
       });
 
       bot.on('end', () => {
@@ -480,6 +530,8 @@ class BotManager {
         if (botData.antiAfk) {
           botData.antiAfk.stop();
         }
+
+        this._triggerAutoReconnect(botData);
       });
     });
   }
@@ -971,11 +1023,14 @@ class BotManager {
     if (!botData) {
       return { success: false, message: 'Bot bulunamadı.' };
     }
+
+    // Tercihi hafızada tut, böylece sunucu bağlantısı koptuğunda falan otomatik geri yükleyebiliriz
+    botData.antiAfkActivePreference = enabled;
+
     if (!botData.antiAfk) {
-      return { success: false, message: 'Anti-AFK modülü hazır değil.' };
-    }
-    if (botData.status !== 'online') {
-      return { success: false, message: 'Bot çevrimdışı.' };
+      // Eğer bot çevrimdışıysa ama tercihi değiştirdiysek başarılı dönelim, online olunca otomatik başlar
+      this.emitBotUpdate();
+      return { success: true, message: `Anti-AFK tercihi ${enabled ? 'aktif' : 'pasif'} olarak güncellendi. (Bot bağlandığında uygulanacak)` };
     }
 
     if (enabled) {
@@ -988,6 +1043,25 @@ class BotManager {
     this.emitBotUpdate();
 
     return { success: true, message: `Anti-AFK ${enabled ? 'açıldı' : 'kapandı'}.` };
+  }
+
+  toggleAutoReconnect(botId, enabled) {
+    const botData = this.bots.get(botId);
+    if (!botData) {
+      return { success: false, message: 'Bot bulunamadı.' };
+    }
+    botData.autoReconnectEnabled = enabled === true;
+
+    if (!botData.autoReconnectEnabled && botData.reconnectTimer) {
+      clearTimeout(botData.reconnectTimer);
+      botData.reconnectTimer = null;
+      if (botData.status === 'reconnecting') {
+        botData.status = 'offline';
+      }
+    }
+
+    this.emitBotUpdate();
+    return { success: true, message: `Otomatik yeniden bağlanma ${enabled ? 'aktif' : 'pasif'} edildi.` };
   }
 
   /**
@@ -1357,6 +1431,12 @@ class BotManager {
     const botData = this.bots.get(botId);
     if (!botData) return;
 
+    botData.userEnded = true;
+
+    if (botData.reconnectTimer) {
+      clearTimeout(botData.reconnectTimer);
+    }
+
     if (botData.connectTimeout) {
       clearTimeout(botData.connectTimeout);
     }
@@ -1367,8 +1447,8 @@ class BotManager {
 
     if (botData.instance) {
       try {
-        botData.instance.end();
         botData.instance.removeAllListeners();
+        botData.instance.end();
       } catch (err) {
         // Bot zaten kapalı olabilir
       }
@@ -1376,6 +1456,41 @@ class BotManager {
 
     this.bots.delete(botId);
     this.emitBotUpdate();
+  }
+
+  _triggerAutoReconnect(botData) {
+    if (botData.userEnded) return;
+
+    if (botData.autoReconnectEnabled === false) {
+      this.emitChatMessage(botData.id, 'system', `ℹ️ Otomatik yeniden bağlanma devre dışı bırakıldığı için bağlantı yenilenmedi.`);
+      if (botData.status === 'reconnecting') {
+        botData.status = 'offline';
+      }
+      this.emitBotUpdate();
+      return;
+    }
+
+    if (botData.reconnectTimer) {
+      clearTimeout(botData.reconnectTimer);
+    }
+
+    // 6-12 saniye arası gürültülü (chaotic) süre, sunucunun nefes almasını sağlar ve korumaları bypass eder
+    const delay = Math.floor(Math.random() * (12000 - 6000 + 1)) + 6000;
+    botData.status = 'reconnecting';
+    this.emitChatMessage(botData.id, 'system', `🔌 Bağlantı koptu. ${Math.round(delay / 1000)} saniye içinde otomatik yeniden bağlanılıyor...`);
+    this.emitBotUpdate();
+
+    botData.reconnectTimer = setTimeout(async () => {
+      if (botData.userEnded) return;
+      if (botData.autoReconnectEnabled === false) return;
+      try {
+        this.emitChatMessage(botData.id, 'system', `⚡ Sunucuya yeniden bağlanma deneniyor (${botData.name})...`);
+        await this._connectBot(botData);
+      } catch (err) {
+        console.error(`[AutoReconnect] Yeniden bağlantı hatası:`, err.message);
+        // Hata durumunda bot.on('error') veya bot.on('end') tetiklenecek, orası otomatik yeniden _triggerAutoReconnect çağıracaktır.
+      }
+    }, delay);
   }
 
   destroyAll() {

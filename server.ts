@@ -239,6 +239,20 @@ io.on('connection', (socket) => {
     }
   });
 
+  // ── Otomatik Yeniden Bağlanma Toggle ────────────────────────
+  socket.on('toggle-autoreconnect', ({ botId, enabled }) => {
+    try {
+      const result = botManager.toggleAutoReconnect(botId, enabled);
+      socket.emit('system-message', { 
+        type: result.success ? 'success' : 'error', 
+        text: result.message 
+      });
+    } catch (err) {
+      console.error('[Socket] toggle-autoreconnect hatası:', err);
+      socket.emit('system-message', { type: 'error', text: 'Otomatik yeniden bağlanma ayarı değiştirilemedi.' });
+    }
+  });
+
   // ── Tüm Botlarda Anti-AFK Toggle ──────────────────────────
   socket.on('toggle-all-antiafk', ({ serverKey, enabled }) => {
     try {
