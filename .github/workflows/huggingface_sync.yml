@@ -19,5 +19,11 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }} # GitHub Repository Secrets kısmına HF_TOKEN adında Hugging Face 'Write' türü token eklemelisiniz (Hugging Face Profile > Settings > Access Tokens > New Token > Write).
         run: |
+          git config --global user.email "github-actions@github.com"
+          git config --global user.name "GitHub Actions"
           # Space URL: https://qwatro-afk-mc.hf.space/ -> Space ID: qwatro/afk-mc
-          git push --force https://qwatro:$HF_TOKEN@huggingface.co/spaces/qwatro/afk-mc main
+          git remote add space https://qwatro:$HF_TOKEN@huggingface.co/spaces/qwatro/afk-mc
+          # Hugging Face tarafındaki güncel referans değerini öğrenmek için push öncesi fetch ediyoruz.
+          # Bu sayede "incorrect old value provided" (geçersiz eski değer) push hatası önlenmiş olur.
+          git fetch space main || true
+          git push --force space main
