@@ -3670,7 +3670,7 @@
       
       // Store safe span tags in a temporary list to bypass HTML escaping safely
       const placeholders = [];
-      let working = str;
+      let working = str.replace(/^%s\s*/i, '');
       
       // Pattern to match safe span tags with style="color:..." or style="font-weight:..." or similar
       const spanRegex = /<span\s+style="([^"]*)"\s*>/gi;
@@ -3698,6 +3698,9 @@
       // Now safe escape HTML of the rest
       working = escapeHtml(working);
       
+      // Convert Minecraft 1.16+ hex color format (§x§1§9§f§f§2§3) to simple hex representation (§#19ff23)
+      working = working.replace(/§x§([a-f0-9A-F])§([a-f0-9A-F])§([a-f0-9A-F])§([a-f0-9A-F])§([a-f0-9A-F])§([a-f0-9A-F])/gi, '§#$1$2$3$4$5$6');
+      
       const parts = working.split('§');
       let html = parts[0];
       let currentStyles = {
@@ -3722,50 +3725,64 @@
       for (let i = 1; i < parts.length; i++) {
         const part = parts[i];
         if (part.length === 0) continue;
-        const code = part.charAt(0).toLowerCase();
-        const text = part.substring(1);
         
-        if (MC_CODE_MAP[code]) {
-          const modifier = MC_CODE_MAP[code];
-          if (modifier.reset) {
-            html += closeAll();
-            currentStyles = { color: null, bold: false, italic: false, underline: false, strikethrough: false, obfuscated: false };
-          } else if (modifier.color) {
-            html += closeAll();
-            currentStyles.color = modifier.color;
-            currentStyles.bold = false;
-            currentStyles.italic = false;
-            currentStyles.underline = false;
-            currentStyles.strikethrough = false;
-            currentStyles.obfuscated = false;
-          } else {
-            if (modifier.bold) currentStyles.bold = true;
-            if (modifier.italic) currentStyles.italic = true;
-            if (modifier.underline) currentStyles.underline = true;
-            if (modifier.strikethrough) currentStyles.strikethrough = true;
-            if (modifier.obfuscated) currentStyles.obfuscated = true;
-          }
-          
-          if (text.length > 0) {
-            let styleStr = '';
-            if (currentStyles.color) styleStr += `color:${currentStyles.color};`;
-            if (currentStyles.bold) styleStr += `font-weight:bold;`;
-            if (currentStyles.italic) styleStr += `font-style:italic;`;
-            if (currentStyles.obfuscated) styleStr += `letter-spacing:1px;font-family:monospace;filter:blur(1px);opacity:0.85;text-shadow:0 0 1px currentColor;`;
-            
-            let textDec = [];
-            if (currentStyles.underline) textDec.push('underline');
-            if (currentStyles.strikethrough) textDec.push('line-through');
-            if (textDec.length > 0) styleStr += `text-decoration:${textDec.join(' ')};`;
-            
-            if (styleStr) {
-              html += `<span style="${styleStr}">`;
-              activeSpans.push(true);
-            }
-            html += text;
-          }
+        let code = '';
+        let text = '';
+        
+        if (part.startsWith('#') && part.length >= 7) {
+          const hexColor = part.substring(0, 7);
+          text = part.substring(7);
+          html += closeAll();
+          currentStyles.color = hexColor;
+          currentStyles.bold = false;
+          currentStyles.italic = false;
+          currentStyles.underline = false;
+          currentStyles.strikethrough = false;
+          currentStyles.obfuscated = false;
         } else {
-          html += '§' + part;
+          code = part.charAt(0).toLowerCase();
+          text = part.substring(1);
+          
+          if (MC_CODE_MAP[code]) {
+            const modifier = MC_CODE_MAP[code];
+            if (modifier.reset) {
+              html += closeAll();
+              currentStyles = { color: null, bold: false, italic: false, underline: false, strikethrough: false, obfuscated: false };
+            } else if (modifier.color) {
+              html += closeAll();
+              currentStyles.color = modifier.color;
+              currentStyles.bold = false;
+              currentStyles.italic = false;
+              currentStyles.underline = false;
+              currentStyles.strikethrough = false;
+              currentStyles.obfuscated = false;
+            } else {
+              if (modifier.bold) currentStyles.bold = true;
+              if (modifier.italic) currentStyles.italic = true;
+              if (modifier.underline) currentStyles.underline = true;
+              if (modifier.strikethrough) currentStyles.strikethrough = true;
+              if (modifier.obfuscated) currentStyles.obfuscated = true;
+            }
+          }
+        }
+        
+        if (text.length > 0) {
+          let styleStr = '';
+          if (currentStyles.color) styleStr += `color:${currentStyles.color};`;
+          if (currentStyles.bold) styleStr += `font-weight:bold;`;
+          if (currentStyles.italic) styleStr += `font-style:italic;`;
+          if (currentStyles.obfuscated) styleStr += `letter-spacing:1px;font-family:monospace;filter:blur(1px);opacity:0.85;text-shadow:0 0 1px currentColor;`;
+          
+          let textDec = [];
+          if (currentStyles.underline) textDec.push('underline');
+          if (currentStyles.strikethrough) textDec.push('line-through');
+          if (textDec.length > 0) styleStr += `text-decoration:${textDec.join(' ')};`;
+          
+          if (styleStr) {
+            html += `<span style="${styleStr}">`;
+            activeSpans.push(true);
+          }
+          html += text;
         }
       }
       

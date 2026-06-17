@@ -1,0 +1,23 @@
+name: Sync to Hugging Face Spaces
+
+on:
+  push:
+    branches: [ "main" ] # GitHub'da kullandığınız ana dal (branch) adı "master" ise burayı master yapın.
+  workflow_dispatch:
+
+jobs:
+  sync-to-hub:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Push to Hugging Face Hub
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }} # GitHub Repository Secrets kısmına HF_TOKEN adında Hugging Face 'Write' türü token eklemelisiniz (Hugging Face Profile > Settings > Access Tokens > New Token > Write).
+        run: |
+          # Space URL: https://qwatro-afk-mc.hf.space/ -> Space ID: qwatro/afk-mc
+          git push --force https://qwatro:$HF_TOKEN@huggingface.co/spaces/qwatro/afk-mc main

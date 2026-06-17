@@ -77,23 +77,43 @@ function cleanMcJsonToText(comp) {
 }
 
 function extractChatText(message) {
-  if (typeof message === 'string') return message;
-  if (message && typeof message.toString === 'function') {
-    try {
-      const str = message.toString();
-      if (str && str !== '[object Object]') return str;
-    } catch (e) {}
+  let result = '';
+  if (typeof message === 'string') {
+    result = message;
+  } else if (message) {
+    if (typeof message.toMotd === 'function') {
+      try {
+        const motd = message.toMotd();
+        if (motd) result = motd;
+      } catch (e) {}
+    }
+    if (!result && typeof message.toString === 'function') {
+      try {
+        const str = message.toString();
+        if (str && str !== '[object Object]') result = str;
+      } catch (e) {}
+    }
+    if (!result && message.json) {
+      result = cleanMcJsonToText(message.json);
+    }
   }
-  if (message && message.json) {
-    return cleanMcJsonToText(message.json);
+  if (!result && typeof message === 'object') {
+    result = cleanMcJsonToText(message);
   }
-  if (message && message.text) {
-    return message.text;
+  if (!result) {
+    result = String(message);
   }
-  if (typeof message === 'object') {
-    return cleanMcJsonToText(message);
-  }
-  return String(message);
+  return result ? result.replace(/^%s\s*/gi, '') : '';
+}
+
+function stripMinecraftCodes(str) {
+  if (!str) return '';
+  let clean = str.replace(/§x§[a-f0-9A-F]§[a-f0-9A-F]§[a-f0-9A-F]§[a-f0-9A-F]§[a-f0-9A-F]§[a-f0-9A-F]/gi, '');
+  clean = clean.replace(/§#[a-f0-9A-F]{6}/gi, '');
+  clean = clean.replace(/§[0-9a-fk-or]/gi, '');
+  clean = clean.replace(/^%s\s*/gi, '');
+  clean = clean.replace(/%s/gi, '');
+  return clean.trim();
 }
 
 function getServerKey(ip, port) {
@@ -456,44 +476,41 @@ class BotManager {
         }
       });
 
-      bot.on('chat', (username, message) => {
-        if (username === bot.username) return;
-        this.emitChatMessage(botData.id, 'chat', `[${username}] ${message}`);
-      });
-
       bot.on('message', (jsonMsg, position) => {
         if (position === 'game_info') return;
 
         const text = extractChatText(jsonMsg);
         if (text && text.trim() && text !== '[object Object]') {
-          this.emitChatMessage(botData.id, 'info', text, jsonMsg.json);
-        }
-      });
+          const cleanText = stripMinecraftCodes(text);
+          if (!cleanText) return;
 
-      bot.on('whisper', (username, message) => {
-        this.emitChatMessage(botData.id, 'whisper', `💬 [Whisper] ${username}: ${message}`);
+          if (!botData.recentMessages) {
+            botData.recentMessages = [];
+          }
+          const now = Date.now();
+          botData.recentMessages = botData.recentMessages.filter(m => now - m.time < 2000);
+
+          const isDuplicate = botData.recentMessages.some(m => m.text === cleanText);
+          if (isDuplicate) {
+            return;
+          }
+
+          botData.recentMessages.push({ text: cleanText, time: now });
+
+          // Pass null instead of jsonMsg.json to avoid broken/faulty client-side parsing.
+          // This allows us to rely 100% on the native server-side toMotd() formatting which is completely accurate.
+          this.emitChatMessage(botData.id, 'info', text, null);
+        }
       });
 
       bot.on('playerJoined', (player) => {
         this._updatePlayerList(botData);
-        if (player && player.username) {
-          const username = player.username.trim();
-          const isValidRealUser = username && /^[a-zA-Z0-9_]{2,20}$/.test(username);
-          if (isValidRealUser) {
-            this.emitChatMessage(botData.id, 'system', `➕ ${username} sunucuya katıldı.`);
-          }
-        }
+        // Silenced join log message to prevent console spam as requested.
       });
 
       bot.on('playerLeft', (player) => {
         this._updatePlayerList(botData);
-        if (player && player.username) {
-          const username = player.username.trim();
-          const isValidRealUser = username && /^[a-zA-Z0-9_]{2,20}$/.test(username);
-          if (isValidRealUser) {
-            this.emitChatMessage(botData.id, 'system', `➖ ${username} sunucudan ayrıldı.`);
-          }
-        }
+        // Silenced left log message to prevent console spam as requested.
       });
 
       bot.on('kicked', (reason) => {

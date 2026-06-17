@@ -109,6 +109,26 @@ app.get('/api/server-info', async (req, res) => {
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
+// Keep Alive / Ping endpoint for 7/24 hosting wake-ups (e.g. cron-job.org or uptime monitor)
+app.get('/api/keep-alive', (req, res) => {
+  const uptime = process.uptime();
+  const formatUptime = (sec) => {
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = Math.floor(sec % 60);
+    return `${h}s ${m}d ${s}sn`;
+  };
+  
+  console.log(`[Keep-Alive] Ping received at ${new Date().toISOString()} from ${req.ip}. Uptime: ${formatUptime(uptime)}`);
+  res.json({
+    status: "alive",
+    message: "Minecraft AFK Client keeps running! 🚀",
+    timestamp: new Date().toISOString(),
+    uptime: formatUptime(uptime),
+    memory: botManager.getRamUsage()
+  });
+});
+
 // Ana sayfa
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
